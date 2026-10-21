@@ -123,7 +123,7 @@ jobs:
       - name: UI Tests
         run: pnpm run test:ui
 
-  continuous-optimization:
+  continuous-optimization-inventory:
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -139,14 +139,14 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
 
-      - name: Run Continuous Optimization
+      - name: Inventory Continuous Optimization Plan (report-only, non-gating)
         run: node scripts/run-continuous-optimization.js --report-only
 
       - name: Upload continuous optimization report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: continuous-optimization-report
+          name: continuous-optimization-inventory-report
           path: ${{ env.WORKDIR }}/test-results/continuous-optimization
           if-no-files-found: warn
 

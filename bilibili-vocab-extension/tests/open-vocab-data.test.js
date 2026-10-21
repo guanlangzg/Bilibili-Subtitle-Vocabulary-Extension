@@ -61,8 +61,41 @@ function readSourceManifest() {
   return readJsonFile('sources.json');
 }
 
+const SYLLABUS_FILE_BY_LEVEL = {
+  cet4: '../cet6-vocabulary/syllabus-2016/cet4.json',
+  cet6: '../cet6-vocabulary/syllabus-2016/cet6.json',
+};
+
+function readSyllabusWords(level) {
+  const filePath = path.resolve(__dirname, '..', SYLLABUS_FILE_BY_LEVEL[level]);
+  const words = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  return new Set(
+    words.map((word) =>
+      String(word || '')
+        .trim()
+        .toLowerCase()
+    )
+  );
+}
+
+function collectUncoveredSyllabusWords(entries, syllabusWords) {
+  const known = new Set(entries.map((entry) => entry.word));
+  return Array.from(syllabusWords).filter((word) => !known.has(word));
+}
+
+function assertSyllabusCoverage(entries, level, syllabusWords) {
+  collectUncoveredSyllabusWords(entries, syllabusWords).forEach((word) => {
+    // 分词器只匹配单词 token，考纲中的多词短语不进入单词级词库
+    assert.ok(word.includes(' '), `${level} 考纲词未收录: ${word}`);
+  });
+}
+
 function hasCuratedExamSignal(entry) {
   return entry.sourceFlags.includes('kylebing') || entry.sourceFlags.includes('netem');
+}
+
+function hasChinese(value) {
+  return /[\u4e00-\u9fff]/.test(String(value || ''));
 }
 
 function expectedCoverageTier(level, entry) {
@@ -199,7 +232,7 @@ test('partOfSpeech 应保持高覆盖率且只输出受支持的规范标签', (
 test('sources.json 应列出真实输入文件并保持可追溯', () => {
   const manifest = readSourceManifest();
 
-  assert.equal(manifest.generatedAt, '2026-04-16');
+  assert.equal(manifest.generatedAt, '2026-10-18');
   assert.equal(Array.isArray(manifest.sources), true);
   assert.ok(manifest.sources.length >= 5);
 
@@ -237,8 +270,9 @@ test('sources.json 应列出真实输入文件并保持可追溯', () => {
     assert.ok(source.files.length > 0, `sources[${index}] files 为空`);
     source.files.forEach((file) => {
       assert.equal(typeof file, 'string');
-      assert.equal(file.startsWith('sources/'), true);
-      const sourcePath = path.join(__dirname, '..', file);
+      // 路径以插件项目目录为基准：sources/ 下为构建输入，../ 前缀指向仓库根目录的收集目录
+      assert.equal(file.startsWith('sources/') || file.startsWith('../'), true);
+      const sourcePath = path.resolve(__dirname, '..', file);
       assert.equal(fs.existsSync(sourcePath), true, `${file} 不存在`);
     });
   });
@@ -265,6 +299,72 @@ test('sources.json 应机器标记许可证发布阻断来源', () => {
     assert.equal(source.redistributable, false, `${source.name} needs-review 不应标为可再分发`);
     assert.equal(source.publishBlocking, true, `${source.name} needs-review 应阻断发布`);
     assert.notEqual(source.reviewAction.trim(), '', `${source.name} 缺少审核动作`);
+  });
+});
+
+test('CET 考纲词表来源应在 sources.json 中登记为可再分发', () => {
+  const manifest = readSourceManifest();
+  const syllabusSource = manifest.sources.find((source) =>
+    source.name.includes('CET 考试大纲词表')
+  );
+
+  assert.ok(syllabusSource, 'sources.json 缺少考纲词表来源');
+  assert.equal(syllabusSource.license, 'MIT');
+  assert.equal(syllabusSource.licenseStatus, 'verified');
+  assert.equal(syllabusSource.redistributable, true);
+  assert.equal(syllabusSource.publishBlocking, false);
+  assert.deepEqual(syllabusSource.files, [
+    '../cet6-vocabulary/syllabus-2016/cet4.json',
+    '../cet6-vocabulary/syllabus-2016/cet6.json',
+  ]);
+});
+
+test('CET4/CET6 词库应完整覆盖考纲词表并标注 syllabus 来源', () => {
+  Object.keys(SYLLABUS_FILE_BY_LEVEL).forEach((level) => {
+    const entries = readLevel(level);
+    const syllabusWords = readSyllabusWords(level);
+
+    assertSyllabusCoverage(entries, level, syllabusWords);
+
+    const entriesByWord = new Map(entries.map((entry) => [entry.word, entry]));
+    syllabusWords.forEach((word) => {
+      const entry = entriesByWord.get(word);
+      if (!entry) {
+        return;
+      }
+      assert.ok(
+        entry.sourceFlags.includes('syllabus'),
+        `${level} 考纲词 ${word} 缺少 syllabus 标记`
+      );
+    });
+  });
+});
+
+test('syllabus 标记应只出现在考纲词目上', () => {
+  Object.keys(SYLLABUS_FILE_BY_LEVEL).forEach((level) => {
+    const entries = readLevel(level);
+    const syllabusWords = readSyllabusWords(level);
+
+    entries.forEach((entry, index) => {
+      assert.equal(
+        entry.sourceFlags.includes('syllabus'),
+        syllabusWords.has(entry.word),
+        `${level}[${index}] ${entry.word} 的 syllabus 标记与考纲词表不一致`
+      );
+    });
+  });
+});
+
+test('考纲补齐词条应带有可用的中文释义与词性', () => {
+  Object.keys(SYLLABUS_FILE_BY_LEVEL).forEach((level) => {
+    const entries = readLevel(level);
+    const syllabusEntries = entries.filter((entry) => entry.sourceFlags.includes('syllabus'));
+
+    assert.ok(syllabusEntries.length > 0, `${level} 缺少已标记的考纲词条`);
+    syllabusEntries.forEach((entry, index) => {
+      assert.ok(entry.meaning && hasChinese(entry.meaning), `${level}[${index}] 缺少中文释义`);
+      assert.ok(entry.definition, `${level}[${index}] 缺少 definition`);
+    });
   });
 });
 
@@ -313,6 +413,11 @@ test('publish 词库构建不应携带 publishBlocking 来源派生数据', asyn
       grouped.KAOYAN.length >= 4000,
       `publish KAOYAN 词条数量过少: ${grouped.KAOYAN.length}`
     );
+
+    // 考纲来源为可再分发数据，发布数据集同样必须完整覆盖考纲词目
+    assertSyllabusCoverage(grouped.CET4, 'cet4', readSyllabusWords('cet4'));
+    assertSyllabusCoverage(grouped.CET6, 'cet6', readSyllabusWords('cet6'));
+
     assert.equal(grouped.IELTS.length, readLevel('ielts').length);
     assert.equal(grouped.TOEFL.length, readLevel('toefl').length);
   } finally {

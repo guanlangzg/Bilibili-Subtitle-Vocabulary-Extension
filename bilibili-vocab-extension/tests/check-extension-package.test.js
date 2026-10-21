@@ -107,7 +107,7 @@ function writeManifestProject(workspace, options = {}) {
         action: { default_popup: 'dist/popup.html' },
         web_accessible_resources: [
           {
-            resources: ['data/*.json', 'dist/overlay.js'],
+            resources: ['dist/overlay.js'],
             matches: ['https://*/*'],
           },
         ],
@@ -285,6 +285,7 @@ test('check extension package: should derive data package entries from vocabular
     'data/ielts.json',
     'data/toefl.json',
     'data/sources.json',
+    'data/ATTRIBUTION.md',
   ]);
   assert.deepEqual(ALLOWED_DATA_PACKAGE_ENTRIES, collectPublishedDataPackageEntries());
 });

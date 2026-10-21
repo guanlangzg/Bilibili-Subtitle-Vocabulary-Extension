@@ -159,7 +159,7 @@
     return null;
   }
 
-  function pickTrackIndex(now) {
+  function pickTrackIndex() {
     const available = [];
 
     const activeTrackCount = getActiveTrackCount();
@@ -420,7 +420,7 @@
     node.style.pointerEvents = 'none';
     applyDanmakuVisualStyle(node, isAssociated);
 
-    const trackIndex = pickTrackIndex(Date.now());
+    const trackIndex = pickTrackIndex();
     if (trackIndex === null) {
       debugDanmakuState('drop: no available track', {
         activeCount,

@@ -115,6 +115,59 @@ function createOverlayStorageModule(options = {}) {
     module: moduleRef,
     exports: moduleRef.exports,
     require(id) {
+      if (id === './chrome-storage-adapter') {
+        return {
+          hasChromeStorage() {
+            return (
+              typeof chrome !== 'undefined' &&
+              Boolean(chrome.storage) &&
+              Boolean(chrome.storage.local)
+            );
+          },
+          getChromeRuntimeError(fallbackMessage) {
+            if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.lastError) {
+              return null;
+            }
+            return new Error(String(chrome.runtime.lastError.message || fallbackMessage));
+          },
+          readStorage(keys) {
+            if (!chrome || !chrome.storage || !chrome.storage.local) {
+              return Promise.resolve({});
+            }
+            return new Promise((resolve, reject) => {
+              chrome.storage.local.get(keys || null, (payload) => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                  reject(
+                    new Error(
+                      String(chrome.runtime.lastError.message || 'chrome.storage.local.get failed')
+                    )
+                  );
+                  return;
+                }
+                resolve(payload || {});
+              });
+            });
+          },
+          writeStorage(payload) {
+            if (!chrome || !chrome.storage || !chrome.storage.local) {
+              return Promise.resolve();
+            }
+            return new Promise((resolve, reject) => {
+              chrome.storage.local.set(payload, () => {
+                if (chrome.runtime && chrome.runtime.lastError) {
+                  reject(
+                    new Error(
+                      String(chrome.runtime.lastError.message || 'chrome.storage.local.set failed')
+                    )
+                  );
+                  return;
+                }
+                resolve();
+              });
+            });
+          },
+        };
+      }
       if (id === './overlay-settings') {
         return {
           SETTINGS_STORAGE_KEY_V3,

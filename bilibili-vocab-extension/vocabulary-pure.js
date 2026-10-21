@@ -68,6 +68,37 @@
     return normalizedLevels;
   }
 
+  // Terms that name a grammatical relation rather than a concept. Replacing them
+  // produces code-switched fragments ("very（完全）", "enough（很多）") instead of a
+  // readable sentence, so they are never indexed.
+  const NON_TERM_TOKENS = new Set(
+    (
+      '关于 对于 至于 由于 为了 通过 根据 按照 随着 除了 经过 作为 成为 因为 所以 但是 而且 如果 虽然 ' +
+      '然后 这样 那样 这里 那里 哪里 自己 大家 我们 你们 他们 她们 它们 别人 有人 什么 为什么 怎么样 ' +
+      '一直 一定 可能 应该 需要 觉得 认为 希望 知道 喜欢 开始 发生 决定 解决 影响 变化 方式 时候 东西 ' +
+      '事情 问题 一个 这个 那个 这些 那些 很多 一些 怎么 非常 完全 特别 真的 其实 已经 一起 旁边 可以 ' +
+      '还是 就是 没有 不是 早点 实话 人们 之后 之前 之间 以上 以下 以及 或者 不过 只是 而是 还有 一样 ' +
+      '时间 方面 地方 情况 部分 接下来 这种 那种 其中 以后 以前 现在 今天 明天 昨天 大概 主要 重要'
+    )
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+
+  // A term ending right before one of these is a fragment of a longer word:
+  // 电影 + 院, 孩子 + 们. Segmentation often splits such compounds, so the suffix
+  // is checked as a second guard.
+  const COMPOUND_SUFFIXES = new Set([
+    ...'院馆店家者员性化们子头长局部所处所院校科室楼路街市县区镇村感度力量率费税价款额数心',
+  ]);
+
+  function isMatchableTerm(term) {
+    const text = String(term || '').trim();
+    if (!/^[\u4e00-\u9fff]{2,4}$/.test(text)) {
+      return false;
+    }
+    return !NON_TERM_TOKENS.has(text);
+  }
+
   function splitMeaning(meaning) {
     const rawMeaning = String(meaning || '').trim();
     if (!rawMeaning) {
@@ -87,8 +118,15 @@
 
     return rawAliases
       .map((alias) => String(alias || '').trim())
-      .filter((alias) => /[\u4e00-\u9fff]/.test(alias))
-      .filter((alias) => alias.length > 1 && alias.length <= 8);
+      .filter((alias) => isMatchableTerm(alias));
+  }
+
+  // Terms the matcher may look up for this entry. Only curated pairs are used:
+  // `meaning` cannot be trusted as a source of replacements because its later
+  // senses are unrelated glosses (address: 住址；演说；举止；灵巧) and the build step
+  // already derives a noun-vetted head term where one is safe.
+  function resolveMatchTerms(aliasTerms) {
+    return aliasTerms;
   }
 
   function normalizeHitCount(value) {
@@ -169,6 +207,7 @@
     const meaningTerms = splitMeaning(meaning);
     const aliasTerms = extractAliasTerms(entry.aliases);
     const mergedTerms = Array.from(new Set([...meaningTerms, ...aliasTerms]));
+    const matchTerms = resolveMatchTerms(aliasTerms);
 
     return {
       word: String(entry.word || '').trim(),
@@ -224,6 +263,7 @@
       easeFactor: normalizeEaseFactor(entry.easeFactor),
       nextReviewAt: normalizeLastSeen(entry.nextReviewAt),
       meaningTerms: mergedTerms.length ? mergedTerms : [meaning],
+      matchTerms,
     };
   }
 
@@ -350,13 +390,21 @@
     return entry && entry.coverageTier === 'core' ? 100 : 10;
   }
 
+  // Ranks the entries behind one Chinese term. Frequency used to dominate this
+  // sum (raw counts scaled by 1e-5 reach ~8000 while level and exam scores are
+  // two-digit), which made the most common polysemous word win every time:
+  // 方式→system, 一起→case. CEFR is not scored here either: rewarding harder words
+  // at this stage picked 计划→programming and 速度→tempo; target difficulty is
+  // applied later against the user's setting.
   function getCandidatePriority(entry, vocabularyMode) {
+    if (!entry) {
+      return 0;
+    }
     return (
       getCoverageTierPriority(entry, vocabularyMode) +
-      (Number(entry && entry.examPriorityScore) || 0) +
-      (Number(entry && entry.examFrequencyScore) || 0) * 0.05 +
-      getLevelPriority(entry && entry.level) * 10 +
-      (Number(entry && entry.frequency) || 0) * 0.00001
+      (Number(entry.examPriorityScore) || 0) * 0.5 +
+      getLevelPriority(entry.level) * 10 +
+      Math.log10((Number(entry.frequency) || 0) + 1)
     );
   }
 
@@ -399,10 +447,6 @@
     };
   }
 
-  function createEntrySnapshotWithRecord(entry, record) {
-    return applyLearningRecordToEntry(entry, record);
-  }
-
   const api = {
     LEVELS,
     LEVEL_CLASS_MAP,
@@ -420,6 +464,9 @@
     normalizeActiveLevels,
     splitMeaning,
     extractAliasTerms,
+    resolveMatchTerms,
+    isMatchableTerm,
+    COMPOUND_SUFFIXES,
     normalizeHitCount,
     normalizeLastSeen,
     normalizeLearningStatus,
@@ -436,7 +483,6 @@
     getLevelClass,
     getCoverageTierPriority,
     getCandidatePriority,
-    createEntrySnapshotWithRecord,
     applyLearningRecordToEntry,
   };
 

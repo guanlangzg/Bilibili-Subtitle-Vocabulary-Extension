@@ -50,6 +50,8 @@
     let overlaySubtitleNavigationSignature = '';
     let overlaySubtitleNavigationPayload = null;
     let runtimePortsWatching = false;
+    let runtimePortListener = null;
+    let runtimePortApi = null;
 
     function getPendingOverlayPayload() {
       return createPendingOverlayPayload();
@@ -244,7 +246,8 @@
       }
 
       runtimePortsWatching = true;
-      runtimeApi.onConnect.addListener((port) => {
+      runtimePortApi = runtimeApi;
+      runtimePortListener = (port) => {
         if (!port || port.name !== messageType) {
           return;
         }
@@ -280,7 +283,23 @@
               logError('Subtitle navigation stream fallback failed', fallbackError);
             }
           });
-      });
+      };
+      runtimeApi.onConnect.addListener(runtimePortListener);
+    }
+
+    function stopRuntimePorts() {
+      if (
+        runtimePortListener &&
+        runtimePortApi &&
+        runtimePortApi.onConnect &&
+        typeof runtimePortApi.onConnect.removeListener === 'function'
+      ) {
+        runtimePortApi.onConnect.removeListener(runtimePortListener);
+      }
+      runtimePortListener = null;
+      runtimePortApi = null;
+      runtimePortsWatching = false;
+      subtitleNavigationPorts.clear();
     }
 
     function ensureGlobalBridge(target) {
@@ -305,6 +324,7 @@
       subscribeOverlay,
       queueBroadcast,
       watchRuntimePorts,
+      stopRuntimePorts,
       ensureGlobalBridge,
     };
   }

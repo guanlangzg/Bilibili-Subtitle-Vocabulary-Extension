@@ -246,6 +246,94 @@
     };
   }
 
+  async function saveWord(messagePayload) {
+    if (!learningState || typeof learningState.buildSavedWordRecord !== 'function') {
+      throw new Error('LearningState.buildSavedWordRecord unavailable');
+    }
+    const payload = messagePayload && typeof messagePayload === 'object' ? messagePayload : {};
+    const word = normalizeWordKey(payload.word);
+    if (!word) {
+      throw new Error('Save word unavailable');
+    }
+    const now =
+      (typeof normalizeTimestamp === 'function' && normalizeTimestamp(payload.now)) || Date.now();
+    // Read the latest snapshot inside the background queue so this save merges
+    // onto whatever hits/reviews landed meanwhile instead of rolling them back.
+    const snapshot = await readLearningSnapshot();
+    const nextRecord = learningState.buildSavedWordRecord(
+      word,
+      snapshot.stats[word] || null,
+      payload.details,
+      now
+    );
+    const nextStats = {
+      ...snapshot.stats,
+      [word]: nextRecord,
+    };
+    const nextQueue =
+      typeof learningState.syncReviewQueue === 'function'
+        ? learningState.syncReviewQueue(snapshot.queue, nextRecord, now)
+        : snapshot.queue;
+    const result = await writeLearningSnapshot(nextStats, nextQueue);
+    return { saved: true, word, summary: result.summary };
+  }
+
+  async function removeWord(messagePayload) {
+    if (!learningState || typeof learningState.buildRemovedWordRecord !== 'function') {
+      throw new Error('LearningState.buildRemovedWordRecord unavailable');
+    }
+    const payload = messagePayload && typeof messagePayload === 'object' ? messagePayload : {};
+    const word = normalizeWordKey(payload.word);
+    if (!word) {
+      throw new Error('Remove word unavailable');
+    }
+    const now =
+      (typeof normalizeTimestamp === 'function' && normalizeTimestamp(payload.now)) || Date.now();
+    const snapshot = await readLearningSnapshot();
+    const nextRecord = learningState.buildRemovedWordRecord(word, snapshot.stats[word], now);
+    if (!nextRecord) {
+      return { removed: false, word };
+    }
+    const nextStats = {
+      ...snapshot.stats,
+      [word]: nextRecord,
+    };
+    const nextQueue =
+      typeof learningState.syncReviewQueue === 'function'
+        ? learningState.syncReviewQueue(snapshot.queue, nextRecord, now)
+        : snapshot.queue;
+    const result = await writeLearningSnapshot(nextStats, nextQueue);
+    return { removed: true, word, summary: result.summary };
+  }
+
+  async function clearVocabulary() {
+    if (!learningState) {
+      throw new Error('LearningState unavailable');
+    }
+    const snapshot = await readLearningSnapshot();
+    const nextStats = { ...snapshot.stats };
+    let clearedCount = 0;
+    Object.keys(nextStats).forEach((key) => {
+      const record = nextStats[key];
+      if (!record || typeof record !== 'object' || record.status !== 'saved') {
+        return;
+      }
+      // Mirror the legacy options-page clear: flip saved words back to seen and
+      // rebuild the summary; the review queue is intentionally left untouched.
+      // saveCount must be reset as well: deriveStatus promotes any record with
+      // saveCount > 0 back to 'saved', so keeping it would undo the clear on the next hit.
+      const nextRecord = { ...record, status: 'seen', saveCount: 0 };
+      delete nextRecord.savedAt;
+      nextStats[key] = nextRecord;
+      clearedCount += 1;
+    });
+    if (clearedCount === 0) {
+      return { cleared: 0 };
+    }
+    const result = await writeLearningSnapshot(nextStats, snapshot.queue);
+    return { cleared: clearedCount, summary: result.summary };
+  }
+
   const api = {
     WORD_STATS_STORAGE_KEY,
     LEARNING_WORD_STATS_STORAGE_KEY,
@@ -254,6 +342,9 @@
     readLearningSnapshot,
     recordLearningHit,
     applyReviewFeedback,
+    saveWord,
+    removeWord,
+    clearVocabulary,
   };
 
   globalScope.BackgroundLearningState = api;

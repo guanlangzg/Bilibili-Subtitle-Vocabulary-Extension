@@ -176,7 +176,7 @@
     element.textContent = originalText;
     element.classList.remove(ENHANCED_CONTAINER_CLASS);
     element.classList.remove(LEGACY_CONTAINER_CLASS);
-    element.dataset.biliVocabRenderedText = normalizeText(originalText);
+    element.dataset.biliVocabRenderedText = normalizeText(element.textContent);
     return true;
   }
 
@@ -202,7 +202,8 @@
 
     element.innerHTML = rendered.html;
     element.dataset.biliVocabOriginalText = rendered.sourceText;
-    element.dataset.biliVocabRenderedText = normalizeText(rendered.mixedText);
+    // Snapshot the DOM we produced so a later site rewrite of the same node can be detected.
+    element.dataset.biliVocabRenderedText = normalizeText(element.textContent);
     return true;
   }
 

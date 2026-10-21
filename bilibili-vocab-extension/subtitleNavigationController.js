@@ -46,6 +46,11 @@
         : () => false;
     let overlayBridgeController = null;
     let runtimeMessagesWatching = false;
+    let runtimeMessageListener = null;
+    let runtimeMessageApi = null;
+    const runtimeMessaging =
+      globalScope.RuntimeMessaging ||
+      (typeof require === 'function' ? require('./runtimeMessaging.js') : null);
 
     function normalizeSubtitleNavigationAction(value) {
       const normalized = String(value || '')
@@ -470,7 +475,16 @@
       }
 
       runtimeMessagesWatching = true;
-      runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      runtimeMessageApi = runtime;
+      runtimeMessageListener = (message, sender, sendResponse) => {
+        if (
+          runtimeMessaging &&
+          typeof runtimeMessaging.isTrustedExtensionSender === 'function' &&
+          !runtimeMessaging.isTrustedExtensionSender(sender)
+        ) {
+          return false;
+        }
+
         const messageType = String(message && message.type ? message.type : '').trim();
         let task = null;
 
@@ -499,7 +513,28 @@
             }
           );
         return true;
-      });
+      };
+      runtime.onMessage.addListener(runtimeMessageListener);
+    }
+
+    function stop() {
+      if (
+        runtimeMessageListener &&
+        runtimeMessageApi &&
+        runtimeMessageApi.onMessage &&
+        typeof runtimeMessageApi.onMessage.removeListener === 'function'
+      ) {
+        runtimeMessageApi.onMessage.removeListener(runtimeMessageListener);
+      }
+      runtimeMessageListener = null;
+      runtimeMessageApi = null;
+      runtimeMessagesWatching = false;
+      if (
+        overlayBridgeController &&
+        typeof overlayBridgeController.stopRuntimePorts === 'function'
+      ) {
+        overlayBridgeController.stopRuntimePorts();
+      }
     }
 
     return {
@@ -517,6 +552,7 @@
       navigateSubtitleByAction,
       watchRuntimePorts,
       watchRuntimeMessages,
+      stop,
     };
   }
 

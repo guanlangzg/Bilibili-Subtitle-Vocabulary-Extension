@@ -34,13 +34,17 @@
     function normalizeSettingsFallback(rawSettings) {
       const source = rawSettings || {};
       return {
-        webPageEnabled: source.webPageEnabled !== false,
+        // Keep the degraded default aligned with the flipped product default
+        // (web page replacement is off unless explicitly enabled).
+        webPageEnabled: source.webPageEnabled === true,
       };
     }
 
     function shouldObserveDomMutations(runtimeSettings, hostname) {
       const currentHost =
-        typeof hostname === 'string' ? hostname : globalThis.location && globalThis.location.hostname;
+        typeof hostname === 'string'
+          ? hostname
+          : globalThis.location && globalThis.location.hostname;
       if (isVideoSiteHost(currentHost) || shouldEnableTimelinePolling()) {
         return true;
       }
@@ -125,25 +129,44 @@
       });
     }
 
+    var destroyed = false;
     var scheduleProcess = (function () {
       var debouncedProcess =
         globalThis.Utils && globalThis.Utils.debounce
           ? globalThis.Utils.debounce(function () {
+              if (destroyed) {
+                return;
+              }
               processAll().catch(function (error) {
                 logError('Process failed', error);
               });
             }, PROCESS_DELAY_MS)
-          : function () {
-              if (processTimer) {
-                clearTimeout(processTimer);
+          : (function () {
+              function fallbackSchedule() {
+                if (destroyed) {
+                  return;
+                }
+                if (processTimer) {
+                  clearTimeout(processTimer);
+                }
+                processTimer = setTimeout(function () {
+                  processTimer = null;
+                  if (destroyed) {
+                    return;
+                  }
+                  processAll().catch(function (error) {
+                    logError('Process failed', error);
+                  });
+                }, PROCESS_DELAY_MS);
               }
-              processTimer = setTimeout(function () {
-                processTimer = null;
-                processAll().catch(function (error) {
-                  logError('Process failed', error);
-                });
-              }, PROCESS_DELAY_MS);
-            };
+              fallbackSchedule.cancel = function cancel() {
+                if (processTimer) {
+                  clearTimeout(processTimer);
+                  processTimer = null;
+                }
+              };
+              return fallbackSchedule;
+            })();
       return debouncedProcess;
     })();
 
@@ -156,7 +179,9 @@
             return [];
           });
         }
-        var fallbackText = normalizeText(globalThis.SubtitleParser.getSubtitleFromTimelineAtCurrentTime());
+        var fallbackText = normalizeText(
+          globalThis.SubtitleParser.getSubtitleFromTimelineAtCurrentTime()
+        );
         var fallbackElement = globalThis.SubtitleParser.getPrimarySubtitleElement();
         if (fallbackElement && fallbackText) {
           await applyTranslation(fallbackElement, fallbackText);
@@ -189,6 +214,9 @@
     }
 
     async function processAll() {
+      if (destroyed) {
+        return;
+      }
       if (processing) {
         pendingProcess = true;
         return;
@@ -202,7 +230,7 @@
         }
       } finally {
         processing = false;
-        if (pendingProcess) {
+        if (pendingProcess && !destroyed) {
           pendingProcess = false;
           scheduleProcess();
         }
@@ -214,6 +242,9 @@
     }
 
     function observeSubtitleChanges() {
+      if (destroyed) {
+        return;
+      }
       if (observer) {
         observer.disconnect();
         observer = null;
@@ -249,6 +280,9 @@
     }
 
     function startTimelinePolling() {
+      if (destroyed) {
+        return;
+      }
       var shouldPoll = shouldEnableTimelinePolling();
       if (!shouldPoll) {
         if (timelinePollTimer) {
@@ -261,6 +295,9 @@
         return;
       }
       timelinePollTimer = setInterval(function () {
+        if (destroyed) {
+          return;
+        }
         var settings = getSettings();
         var latestTarget = resolveSubtitleObserverTarget(settings);
         if (shouldRefreshSubtitleObserver(observerTarget, latestTarget)) {
@@ -273,11 +310,15 @@
     }
 
     function destroy() {
+      destroyed = true;
       if (observer) {
         observer.disconnect();
         observer = null;
       }
       observerTarget = null;
+      if (typeof scheduleProcess.cancel === 'function') {
+        scheduleProcess.cancel();
+      }
       if (processTimer) {
         clearTimeout(processTimer);
         processTimer = null;
@@ -296,16 +337,12 @@
       startTimelinePolling: startTimelinePolling,
       processSubtitles: processSubtitles,
       processAll: processAll,
-      processWebPageText: processWebPageText,
-      restoreItemsToSourceText: restoreItemsToSourceText,
       shouldObserveDomMutations: shouldObserveDomMutations,
       shouldRetargetSubtitleObserver: shouldRetargetSubtitleObserver,
       shouldRefreshSubtitleObserver: shouldRefreshSubtitleObserver,
-      shouldRunMutationObserverRefresh: shouldRunMutationObserverRefresh,
       shouldRestoreWebItems: shouldRestoreWebItems,
       shouldRunLegacyWebTextPipeline: shouldRunLegacyWebTextPipeline,
       runInAnimationFrame: runInAnimationFrame,
-      resolveSubtitleObserverTarget: resolveSubtitleObserverTarget,
       destroy,
     };
   }

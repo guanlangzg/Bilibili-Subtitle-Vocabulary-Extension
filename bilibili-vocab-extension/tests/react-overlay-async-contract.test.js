@@ -16,16 +16,12 @@ test('react overlay async contract: overlay entry should guard summary load fail
   assert.match(source, /跟随学习状态实时刷新/);
 });
 
-test('react overlay async contract: persistImmediate should persist before committing UI state', () => {
+test('react overlay async contract: overlay visibility should commit normalized snapshots', () => {
   const source = readProjectFile('react-ui/src/components/overlay-entry.tsx');
 
-  assert.match(
-    source,
-    /async function persistImmediate\(next: SettingsV3, message: string\) \{[\s\S]*const persisted = await saveOverlaySettingsV3\(next\);[\s\S]*setWorkingDirect\(persisted\);/
-  );
-  assert.doesNotMatch(
-    source,
-    /async function persistImmediate\(next: SettingsV3, message: string\) \{[\s\S]*setWorkingDirect\(next\);/
-  );
-  assert.match(source, /保存失败，请重试。/);
+  assert.match(source, /const next = normalizeSettingsV3\(\{/);
+  assert.match(source, /await commit\(next, '已隐藏悬浮面板。'\)/);
+  assert.match(source, /await commit\(next, '悬浮面板已恢复。'\)/);
+  assert.doesNotMatch(source, /persistImmediate/);
+  assert.doesNotMatch(source, /setWorkingDirect\(next\)/);
 });

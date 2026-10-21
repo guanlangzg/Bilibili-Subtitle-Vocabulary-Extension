@@ -65,7 +65,7 @@ function createNode(parent = null) {
   };
 }
 
-test('addElementByContainment: �ӽڵ����ʱӦ�滻���ռ��ĸ��ڵ�', () => {
+test('addElementByContainment: child should replace its collected parent', () => {
   const parent = createNode();
   const child = createNode(parent);
   const collected = [parent];
@@ -76,7 +76,7 @@ test('addElementByContainment: �ӽڵ����ʱӦ�滻���ռ��ĸ�
   assert.deepEqual(collected, [child]);
 });
 
-test('addElementByContainment: ���ڵ�����ʱ��Ӧ�������ռ��ӽڵ�', () => {
+test('addElementByContainment: parent should not be added when its child is already collected', () => {
   const parent = createNode();
   const child = createNode(parent);
   const collected = [child];
@@ -85,4 +85,31 @@ test('addElementByContainment: ���ڵ�����ʱ��Ӧ�����
 
   assert.equal(added, false);
   assert.deepEqual(collected, [child]);
+});
+
+test('pickPreferredSubtitleTrack: 中文轨道（含 AI 字幕与繁体）应优先于外语轨道', () => {
+  const cases = [
+    { lans: ['en-US', 'ai-zh'], expected: 'ai-zh' },
+    { lans: ['en-US', 'zh-Hant'], expected: 'zh-Hant' },
+    { lans: ['en', 'zh-TW'], expected: 'zh-TW' },
+    { lans: ['zh-Hans', 'zh-CN', 'zh-Hant'], expected: 'zh-Hans' },
+  ];
+
+  cases.forEach(({ lans, expected }) => {
+    const selected = subtitleParser.pickPreferredSubtitleTrack(
+      lans.map((lan, index) => ({ lan, subtitle_url: `https://example.com/${index}.json` }))
+    );
+    assert.ok(selected, `expected a track for ${lans.join(',')}`);
+    assert.equal(selected.lan, expected);
+  });
+});
+
+test('pickPreferredSubtitleTrack: 全为外语轨道时应保持原有优先级', () => {
+  const selected = subtitleParser.pickPreferredSubtitleTrack([
+    { lan: 'fr', subtitle_url: 'https://example.com/fr.json' },
+    { lan: 'en', subtitle_url: 'https://example.com/en.json' },
+  ]);
+
+  assert.ok(selected);
+  assert.equal(selected.lan, 'en');
 });

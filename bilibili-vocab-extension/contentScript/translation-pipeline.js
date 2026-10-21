@@ -22,7 +22,8 @@
       }
       const selectionStateVersion = getSelectionStateVersion();
       if (hasMethod(globalThis.SubtitleTranslator, 'createSettingsFingerprint')) {
-        const fingerprint = globalThis.SubtitleTranslator.createSettingsFingerprint(runtimeSettings);
+        const fingerprint =
+          globalThis.SubtitleTranslator.createSettingsFingerprint(runtimeSettings);
         return `${normalizedText}::${fingerprint}::selection:${selectionStateVersion}`;
       }
       const normalized = normalizeSettings(runtimeSettings);
@@ -46,7 +47,10 @@
 
     function createTranslationRuntimeFingerprint(runtimeSettings) {
       const normalized = normalizeSettings(runtimeSettings);
-      const translationFingerprint = hasMethod(globalThis.SubtitleTranslator, 'createSettingsFingerprint')
+      const translationFingerprint = hasMethod(
+        globalThis.SubtitleTranslator,
+        'createSettingsFingerprint'
+      )
         ? globalThis.SubtitleTranslator.createSettingsFingerprint(normalized)
         : [
             normalized.replaceRatio.toFixed(2),
@@ -107,12 +111,12 @@
         return;
       }
       const generationAtStart = getRenderGeneration();
+      const settings = getSettings();
       resetHitTrackingIfSourceChanged(element, currentText);
-      const renderSignature = createRenderSignature(currentText, getSettings());
-      if (isRenderUpToDate(element, currentText, getSettings())) {
+      const renderSignature = createRenderSignature(currentText, settings);
+      if (isRenderUpToDate(element, currentText, settings)) {
         return;
       }
-      const settings = getSettings();
       if (!settings.enabled) {
         if (generationAtStart !== getRenderGeneration()) {
           return;

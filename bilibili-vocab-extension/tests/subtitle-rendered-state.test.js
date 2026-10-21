@@ -83,3 +83,62 @@ test('renderTokensToHtml: should preserve original source text on rendered word 
 
   assert.equal(html.includes('data-source-text="金字塔"'), true);
 });
+
+test('extractSubtitleText: should keep the stored original while our rendering is intact', () => {
+  const previousHTMLElement = global.HTMLElement;
+  global.HTMLElement = MockElement;
+
+  try {
+    const element = new MockElement({
+      textContent: 'pyramid（金字塔）',
+      dataset: {
+        biliVocabOriginalText: '金字塔',
+        biliVocabRenderedText: 'pyramid（金字塔）',
+      },
+    });
+
+    assert.equal(subtitleParser.extractSubtitleText(element), '金字塔');
+  } finally {
+    global.HTMLElement = previousHTMLElement;
+  }
+});
+
+test('extractSubtitleText: should drop stale markers when the site rewrites a reused node', () => {
+  const previousHTMLElement = global.HTMLElement;
+  global.HTMLElement = MockElement;
+
+  try {
+    const element = new MockElement({
+      textContent: '新的字幕',
+      dataset: {
+        biliVocabOriginalText: '旧的字幕',
+        biliVocabRenderedText: '旧的字幕',
+      },
+    });
+
+    assert.equal(subtitleParser.extractSubtitleText(element), '新的字幕');
+    assert.equal('biliVocabOriginalText' in element.dataset, false);
+    assert.equal('biliVocabRenderedText' in element.dataset, false);
+  } finally {
+    global.HTMLElement = previousHTMLElement;
+  }
+});
+
+test('extractSubtitleText: should treat an empty rendered snapshot as not drifted', () => {
+  const previousHTMLElement = global.HTMLElement;
+  global.HTMLElement = MockElement;
+
+  try {
+    const element = new MockElement({
+      textContent: 'pyramid（金字塔）',
+      dataset: {
+        biliVocabOriginalText: '金字塔',
+      },
+    });
+
+    assert.equal(subtitleParser.extractSubtitleText(element), '金字塔');
+    assert.equal(element.dataset.biliVocabOriginalText, '金字塔');
+  } finally {
+    global.HTMLElement = previousHTMLElement;
+  }
+});

@@ -9,7 +9,6 @@ const previousDocument = global.document;
 const previousChrome = global.chrome;
 const previousLocation = global.location;
 const previousReactOverlayModule = global.ReactOverlayModule;
-const previousOverlayPanelModule = global.OverlayPanelModule;
 
 global.document = {
   readyState: 'loading',
@@ -47,7 +46,6 @@ const contentScript = require('../contentScript/index.js');
 test.beforeEach(() => {
   contentScript.__resetOverlayModuleStateForTest();
   delete global.ReactOverlayModule;
-  delete global.OverlayPanelModule;
 });
 
 test('overlayLoader: should cache imports and reset state', async () => {
@@ -169,6 +167,5 @@ test.after(() => {
   global.chrome = previousChrome;
   global.location = previousLocation;
   global.ReactOverlayModule = previousReactOverlayModule;
-  global.OverlayPanelModule = previousOverlayPanelModule;
   delete require.cache[contentScriptPath];
 });

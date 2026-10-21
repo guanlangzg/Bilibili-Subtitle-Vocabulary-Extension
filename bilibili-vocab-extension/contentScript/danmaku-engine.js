@@ -209,16 +209,9 @@
     }
 
     return {
-      startReviewEngine,
-      stopReviewEngine,
-      pauseReviewEngine,
       syncDanmakuSettings,
       shouldRunReviewDanmaku,
       getPlaybackState,
-      onVideoPlay,
-      onVideoPauseOrEnd,
-      onVideoTimeUpdate,
-      onVideoSeeked,
       unbindVideoPlaybackEvents,
       bindVideoPlaybackEvents,
       syncEngineWithPlayback,

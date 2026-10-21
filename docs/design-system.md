@@ -2,7 +2,7 @@
 
 This document describes the design language and token system used across the Bilibili Subtitle Vocabulary extension UI.
 
-The design language is called **Evidence Warm Precision**: warm, precise, low-noise, and evidence-first. It is optimized for a learning tool that overlays on video content.
+The design language is called **Apple Utility**: neutral, task-first, system-native, and low-noise. It is optimized for a learning tool that must stay readable inside a browser extension popup, a dense settings page, and a video overlay.
 
 All product tokens live under the `bsv-*` namespace and are defined in `bilibili-vocab-extension/react-ui/src/styles/tokens.css`. Component classes are defined in `bilibili-vocab-extension/react-ui/src/styles/ui.css`.
 
@@ -14,7 +14,7 @@ All product tokens live under the `bsv-*` namespace and are defined in `bilibili
 
 | Token | Description |
 |-------|-------------|
-| `--bsv-bg` | Core canvas — warm paper tone in light mode. |
+| `--bsv-bg` | Core canvas, using the Apple-like neutral `#f5f5f7` in light mode. |
 | `--bsv-surface` | Primary raised surface color. |
 | `--bsv-surface-elevated` | Elevated surface, slightly warmer/lighter. |
 | `--bsv-surface-sunken` | Depressed or grouped surface. |
@@ -38,7 +38,7 @@ All product tokens live under the `bsv-*` namespace and are defined in `bilibili
 
 | Token | Description |
 |-------|-------------|
-| `--bsv-accent` | Primary terracotta accent. |
+| `--bsv-accent` | Primary system blue accent (`#0071e3`). |
 | `--bsv-accent-soft` | Lighter accent for hover/gradients. |
 | `--bsv-accent-hover` | Accent hover state. |
 | `--bsv-accent-active` | Accent active/pressed state. |
@@ -129,8 +129,8 @@ All spacing values are based on a 4px grid.
 
 | Token | Stack |
 |-------|-------|
-| `--bsv-font-display` | `"Newsreader", Georgia, "Songti SC", serif` |
-| `--bsv-font-body` | `"Inter", system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif` |
+| `--bsv-font-display` | `-apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif` |
+| `--bsv-font-body` | `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Hiragino Sans GB", sans-serif` |
 | `--bsv-font-mono` | `"JetBrains Mono", ui-monospace, "Cascadia Code", "Source Code Pro", monospace` |
 
 #### Font Sizes
@@ -168,7 +168,7 @@ All spacing values are based on a 4px grid.
 
 | Token | Value |
 |-------|-------|
-| `--bsv-letter-spacing-tight` | -0.01em |
+| `--bsv-letter-spacing-tight` | 0 |
 | `--bsv-letter-spacing-normal` | 0 |
 | `--bsv-letter-spacing-wide` | 0.02em |
 | `--bsv-letter-spacing-wider` | 0.06em |
@@ -215,19 +215,24 @@ All spacing values are based on a 4px grid.
 | `.stagger-enter` | Entrance animation that fades and rises; delay is derived from sibling order (`:nth-child`). |
 | `.inline` | Horizontal flex layout with `space-between` alignment. Use `.wrap` to allow wrapping. |
 | `.grid-two` | Two-column grid. Collapses to a single column on narrow viewports. |
-| `.popup-shell` | Constrained wrapper for the extension popup. |
+| `.popup-shell` | Constrained wrapper for the extension popup. Default width targets a task-first popup around 650px. |
+| `.popup-appbar` | Compact popup top bar with brand, current profile, sync state, and an icon settings action. |
+| `.popup-primary-flow` | Popup first-screen task flow: site control, quick review, subtitle navigation, then metrics. |
+| `.popup-more` | Collapsible advanced popup area for secondary display and tuning controls. |
 | `.settings-shell` | Two-column settings page wrapper (sidebar + main). |
 | `.settings-sidebar` | Sticky sidebar panel for settings navigation. |
 | `.settings-main` | Main content area of the settings page. |
+| `.settings-toolbar` | Compact settings header with current profile, sync status, and primary actions. |
+| `.settings-list` | System-settings style grouped list surface for dense configuration content. |
+| `.bsv-overlay-tabs` | Overlay segmented tab control for learning, controls, and display panels. |
 
-### Typography / Hero
+### Typography / Entry Surfaces
 
 | Class | Usage |
 |-------|-------|
-| `.studio-hero` | Hero banner with gradient surface and accent left border. |
-| `.studio-eyebrow` | Uppercase label with an accent dot, used above the title. |
-| `.studio-title` | Large gradient display title. |
-| `.studio-subtitle` | Muted descriptive text below the title. |
+| `.studio-hero` | Legacy hero surface. Avoid for Popup and Options task flows. |
+| `.studio-title` | Legacy large title. Prefer compact section headings in task surfaces. |
+| `.studio-subtitle` | Muted descriptive text below a title. Keep concise in dense settings panels. |
 
 ### Controls
 
@@ -258,7 +263,7 @@ Dark mode tokens are redefined in `tokens.css`.
 - **Popup / Options pages**: activate dark mode by setting `data-bsv-theme="dark"` on `body.v3-page` (selector: `body.v3-page[data-bsv-theme="dark"]`).
 - **Overlay**: activate dark mode by setting `data-theme="dark"` on `.bsv-overlay-root`.
 
-The dark theme uses warm dark surfaces (`#0d0c0a`, `#181613`, `#221f1b`) with brighter terracotta accents and adjusted semantic colors for adequate contrast.
+The dark theme uses neutral dark surfaces with the same system blue accent and adjusted semantic colors for adequate contrast.
 
 ## Accessibility Minimum
 

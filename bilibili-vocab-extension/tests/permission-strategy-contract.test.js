@@ -8,6 +8,7 @@ const REPO_ROOT = path.join(PROJECT_ROOT, '..');
 const PRIVACY_DOC = path.join(REPO_ROOT, 'docs', '隐私政策.md');
 const PERMISSIONS_DOC = path.join(REPO_ROOT, 'docs', '权限说明.md');
 const README = path.join(REPO_ROOT, 'README.md');
+const STORAGE_TS = path.join(PROJECT_ROOT, 'react-ui', 'src', 'lib', 'storage.ts');
 
 function readManifest() {
   const raw = fs
@@ -40,6 +41,22 @@ function getWebAccessibleResources(manifest) {
     : [];
   const firstEntry = entries[0] || {};
   return Array.isArray(firstEntry.resources) ? firstEntry.resources : [];
+}
+
+function getManifestContentScriptFiles(manifest) {
+  const entries = Array.isArray(manifest.content_scripts) ? manifest.content_scripts : [];
+  const firstEntry = entries[0] || {};
+  return Array.isArray(firstEntry.js) ? firstEntry.js : [];
+}
+
+function readContentRuntimeScriptFiles() {
+  const source = fs.readFileSync(STORAGE_TS, 'utf8');
+  const match = source.match(
+    /export const CONTENT_RUNTIME_SCRIPT_FILES = \[([\s\S]*?)\] as const;/
+  );
+  assert.ok(match, 'CONTENT_RUNTIME_SCRIPT_FILES export should exist');
+
+  return Array.from(match[1].matchAll(/'([^']+)'/g), (entry) => entry[1]);
 }
 
 test('permission strategy contract: default manifest should use minimal Bilibili and YouTube scope', () => {
@@ -80,7 +97,7 @@ test('permission strategy contract: default manifest should use minimal Bilibili
   assert.match(permissionsDoc, /默认内容脚本只运行在/);
 });
 
-test('permission strategy contract: web accessible resources should stay minimal', () => {
+test('permission strategy contract: web accessible resources should stay scoped to vocabulary data and overlay bundle', () => {
   const manifest = readManifest();
   const webAccessibleEntries = Array.isArray(manifest.web_accessible_resources)
     ? manifest.web_accessible_resources
@@ -90,6 +107,8 @@ test('permission strategy contract: web accessible resources should stay minimal
   );
 
   assert.equal(webAccessibleEntries.length, 1);
+  // data/*.json must stay web-accessible: content scripts fetch vocabulary JSON
+  // via chrome.runtime.getURL with the page origin (rejected otherwise in MV3).
   assert.deepEqual(resources, ['data/*.json', 'dist/overlay.js']);
   assert.equal(resources.includes('dist/*'), false);
   assert.equal(resources.includes('dist/assets/*'), false);
@@ -98,6 +117,18 @@ test('permission strategy contract: web accessible resources should stay minimal
   assert.equal(resources.includes('react-ui/*'), false);
   assert.equal(resources.includes('tests/*'), false);
   assert.equal(resources.includes('sources/*'), false);
+});
+
+test('permission strategy contract: manifest and optional-host injection should load the same runtime files', () => {
+  const manifest = readManifest();
+  const manifestFiles = getManifestContentScriptFiles(manifest);
+  const manualInjectionFiles = readContentRuntimeScriptFiles();
+
+  assert.deepEqual(manifestFiles, manualInjectionFiles);
+  assert.ok(
+    manifestFiles.indexOf('scripts/danmaku.js') < manifestFiles.indexOf('scripts/scheduler.js'),
+    'danmaku runtime must load before scheduler'
+  );
 });
 
 test('permission strategy contract: target state should be minimal Bilibili and YouTube injection', () => {

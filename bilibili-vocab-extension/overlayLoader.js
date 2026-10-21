@@ -11,7 +11,7 @@
   }
 
   function resolveGlobalOverlayModule() {
-    const module = globalScope.ReactOverlayModule || globalScope.OverlayPanelModule;
+    const module = globalScope.ReactOverlayModule;
     return isValidOverlayModule(module) ? module : null;
   }
 

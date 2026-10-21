@@ -22,10 +22,20 @@
 
   function debounce(fn, delay) {
     let timer = null;
-    return function (...args) {
+    function debounced(...args) {
       if (timer) clearTimeout(timer);
-      timer = setTimeout(() => fn.apply(this, args), delay);
+      timer = setTimeout(() => {
+        timer = null;
+        fn.apply(this, args);
+      }, delay);
+    }
+    debounced.cancel = function cancel() {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
     };
+    return debounced;
   }
 
   function logError(context, error) {

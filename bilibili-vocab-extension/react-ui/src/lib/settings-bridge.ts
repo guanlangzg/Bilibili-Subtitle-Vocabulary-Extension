@@ -30,6 +30,11 @@ import type {
   SettingsV3,
   ThemeMode,
 } from './settings-normalizer';
+import {
+  applyProfileConfigPatch,
+  createSharedSettingsGuard,
+  listProfileOptionsWithLabels,
+} from './settings-bridge-core';
 
 export interface ScenePreset {
   replaceRatio: number;
@@ -99,58 +104,12 @@ declare global {
 
 const SHARED_SETTINGS_ERROR = 'SharedSettings is required before React settings bridge loads';
 
-function readSharedSettings(): SharedSettingsApi | undefined {
-  const globalShared =
-    typeof globalThis !== 'undefined'
-      ? (globalThis as typeof globalThis & { SharedSettings?: SharedSettingsApi }).SharedSettings
-      : undefined;
-  const windowShared =
-    typeof window !== 'undefined'
-      ? (window as Window & { SharedSettings?: SharedSettingsApi }).SharedSettings
-      : undefined;
-  const shared = windowShared || globalShared;
-  return shared && typeof shared === 'object' ? shared : undefined;
-}
-
-function getSharedSettings(): SharedSettingsApi {
-  const shared = readSharedSettings();
-  if (!shared) {
-    throw new Error(SHARED_SETTINGS_ERROR);
-  }
-  return shared;
-}
-
-function requireSharedSettingsFunction<T extends (...args: never[]) => unknown>(
-  name: keyof SharedSettingsApi
-): T {
-  const value = shared[name];
-  if (typeof value !== 'function') {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} must be a function`);
-  }
-  return value as unknown as T;
-}
-
-function requireSharedSettingsArray<T>(name: keyof SharedSettingsApi): T[] {
-  const value = shared[name];
-  if (!Array.isArray(value)) {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} must be an array`);
-  }
-  return value.slice() as T[];
-}
-
-function requireSharedSettingsValue<T>(name: keyof SharedSettingsApi): T {
-  const value = shared[name];
-  if (value == null) {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} is missing`);
-  }
-  return value as T;
-}
+const { requireSharedSettingsFunction, requireSharedSettingsArray, requireSharedSettingsValue } =
+  createSharedSettingsGuard<SharedSettingsApi>(SHARED_SETTINGS_ERROR);
 
 function cloneValue<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
-
-const shared = getSharedSettings();
 
 // Legacy storage key retained for backward compatibility with existing installs.
 export const SETTINGS_STORAGE_KEY_V3 =
@@ -329,37 +288,28 @@ export function setActiveProfileConfig(
   profileId: ProfileId,
   config: Partial<ProfileConfig>
 ): SettingsV3 {
-  const copy = cloneSettingsV3(normalizeSettingsV3(settings));
-  const normalized = normalizeProfileConfig({
-    ...getProfileConfigById(copy, profileId),
-    ...config,
-  });
-  if (BUILTIN_PROFILE_IDS.includes(profileId as BuiltinProfileId)) {
-    copy.profilesBuiltin[profileId as BuiltinProfileId] = normalized;
-  } else {
-    copy.profilesCustom = copy.profilesCustom.map((item) =>
-      item.id === profileId ? { ...item, config: normalized, updatedAt: Date.now() } : item
-    );
-  }
-  return normalizeSettingsV3(copy);
+  return applyProfileConfigPatch(
+    {
+      builtinProfileIds: BUILTIN_PROFILE_IDS,
+      normalizeSettingsV3,
+      normalizeProfileConfig:
+        requireSharedSettingsFunction<SharedSettingsApi['normalizeProfileConfig']>(
+          'normalizeProfileConfig'
+        ),
+      getProfileConfigById,
+    },
+    settings,
+    profileId,
+    config
+  );
 }
 
 export function listProfileOptions(
   settings: SettingsV3
 ): Array<{ id: ProfileId; name: string; builtin: boolean }> {
-  const normalized = normalizeSettingsV3(settings);
-  const builtin: Array<{ id: ProfileId; name: string; builtin: boolean }> = BUILTIN_PROFILE_IDS.map(
-    (id) => ({
-      id,
-      name: PROFILE_META[id]?.label || id,
-      builtin: true,
-    })
+  return listProfileOptionsWithLabels(
+    BUILTIN_PROFILE_IDS,
+    settings,
+    (id) => PROFILE_META[id]?.label || id
   );
-  const custom: Array<{ id: ProfileId; name: string; builtin: boolean }> =
-    normalized.profilesCustom.map((item) => ({
-      id: item.id,
-      name: item.name,
-      builtin: false,
-    }));
-  return builtin.concat(custom);
 }

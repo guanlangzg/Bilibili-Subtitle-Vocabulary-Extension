@@ -32,7 +32,7 @@
           reviewDanmakuDensity: 'normal',
           vocabularyMode: 'core',
           examPreference: 'balanced',
-          webPageEnabled: true,
+          webPageEnabled: false,
           domainRules: {},
           activeLevels: LEVELS.slice(),
           replaceRatio: 0.2,
@@ -322,7 +322,7 @@
       reviewDanmakuDensity: normalizeReviewDanmakuDensity(source.reviewDanmakuDensity),
       vocabularyMode: normalizeVocabularyMode(source.vocabularyMode),
       examPreference: normalizeExamPreference(source.examPreference),
-      webPageEnabled: source.webPageEnabled !== false,
+      webPageEnabled: source.webPageEnabled === true,
       domainRules: normalizeDomainRules(source.domainRules),
       activeLevels: normalizeActiveLevels(source.activeLevels),
       replaceRatio: Math.min(
@@ -416,7 +416,7 @@
     const source = rawControls && typeof rawControls === 'object' ? rawControls : {};
     return {
       reviewDanmakuEnabled: source.reviewDanmakuEnabled === true,
-      webPageEnabled: source.webPageEnabled !== false,
+      webPageEnabled: source.webPageEnabled === true,
       siteRules: normalizeDomainRules(source.siteRules),
       overlayState: normalizeOverlayState(source.overlayState),
     };
@@ -717,71 +717,6 @@
     return '括号释义';
   }
 
-  function getHeroMetricMeta(type, value) {
-    if (type === 'ratio') {
-      const ratio = Math.min(
-        0.3,
-        Math.max(0.1, parseFiniteNumber(value, DEFAULT_SETTINGS.replaceRatio))
-      );
-      if (ratio <= 0.15) {
-        return '轻量低扰';
-      }
-      if (ratio >= 0.25) {
-        return '强化输入';
-      }
-      return '均衡曝光';
-    }
-
-    if (type === 'reviewSpeed') {
-      const speed = normalizeReviewDanmakuSpeed(value);
-      if (speed === 'slow') {
-        return '低压慢复习';
-      }
-      if (speed === 'fast') {
-        return '冲刺高频';
-      }
-      return '稳定推进';
-    }
-
-    if (type === 'reviewDensity') {
-      const density = normalizeReviewDanmakuDensity(value);
-      if (density === 'sparse') {
-        return '低频回放';
-      }
-      if (density === 'dense') {
-        return '高频回放';
-      }
-      return '稳定回放';
-    }
-
-    if (type === 'cefr') {
-      const cefr = normalizeTargetCefr(value);
-      if (['A1', 'A2'].includes(cefr)) {
-        return '稳步入门';
-      }
-      if (['C1', 'C2'].includes(cefr)) {
-        return '进阶挑战';
-      }
-      return '渐进提升';
-    }
-
-    if (type === 'maxReplace') {
-      const count = Math.min(
-        5,
-        Math.max(1, Math.floor(parseFiniteNumber(value, DEFAULT_SETTINGS.maxReplaceCount)))
-      );
-      if (count >= 4) {
-        return '高密度命中';
-      }
-      if (count <= 1) {
-        return '轻量点状';
-      }
-      return '低干扰节奏';
-    }
-
-    return '实时同步';
-  }
-
   function getMockPreviewData(targetCefr, ratio, maxReplaceCount) {
     const presetMap = {
       A1: ['learn', 'watch', 'word'],
@@ -917,7 +852,6 @@
     getReviewDanmakuSpeedLabel,
     getReviewDanmakuDensityLabel,
     getBilingualModeLabel,
-    getHeroMetricMeta,
     getMockPreviewData,
     getLearningProfile,
     buildSettingsPreview,

@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-04-16",
+  "generatedAt": "2026-10-18",
   "sources": [
     {
       "name": "ECDICT",
@@ -63,6 +63,22 @@
         "sources/netem_full_list.json"
       ],
       "notes": "提供考研词频排序，用于构建 KAOYAN 的 examFrequencyScore 与 examPriorityScore。"
+    },
+    {
+      "name": "CET 考试大纲词表 via ismartcoding/endict",
+      "url": "https://github.com/ismartcoding/endict",
+      "license": "MIT",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "publishBlocking": false,
+      "reviewAction": "",
+      "files": [
+        "../cet6-vocabulary/syllabus-2016/cet4.json",
+        "../cet6-vocabulary/syllabus-2016/cet6.json"
+      ],
+      "notes": "《全国大学英语四、六级考试大纲（2016年修订版）》词表（四级 / 六级分列），用于考纲词目判定与考纲缺失词补齐。"
     },
     {
       "name": "CC-CEDICT",

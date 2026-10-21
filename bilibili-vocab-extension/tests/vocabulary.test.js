@@ -147,3 +147,104 @@ test('getReviewQueue: should prioritize today bucket before soon bucket', async 
   assert.equal(queue[1].word, 'beta');
   assert.equal(queue[1].dueBucket, 'soon');
 });
+
+test('recordHit: should apply learning state to every level entry sharing the same word', () => {
+  // Only entries carrying a curated match term are indexed, so both levels need
+  // aliases; the assertion is about the shared learning record, not matching.
+  vocabulary.__setEntriesForTest([
+    {
+      word: 'identification',
+      meaning: '识别',
+      aliases: ['识别'],
+      level: 'CET4',
+      coverageTier: 'core',
+    },
+    {
+      word: 'identification',
+      meaning: '鉴定；认同',
+      aliases: ['识别'],
+      level: 'TOEFL',
+      coverageTier: 'full',
+    },
+  ]);
+
+  assert.equal(vocabulary.recordHit('identification'), true);
+  assert.equal(vocabulary.recordHit('identification'), true);
+
+  const matches = vocabulary.findMatchesInText('需要识别这段文本', ['CET4', 'TOEFL'], {
+    vocabularyMode: 'core',
+  });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].level, 'CET4');
+  assert.equal(matches[0].learningStatus, 'seen');
+
+  const encountered = vocabulary.getEncounteredWords();
+  assert.deepEqual(encountered.map((item) => item.level).sort(), ['CET4', 'TOEFL']);
+  encountered.forEach((item) => {
+    assert.equal(item.hitCount, 2);
+  });
+});
+
+test('findMatchesInText: core 模式下没有 core 词条的等级应回退到 full', () => {
+  // A publish build has no core rows at any level, and IELTS/TOEFL never carry
+  // any. Without the fallback the shipped extension replaces nothing at all under
+  // its default vocabularyMode.
+  vocabulary.__setEntriesForTest([
+    {
+      word: 'movie',
+      meaning: '电影',
+      aliases: ['电影'],
+      level: 'IELTS',
+      coverageTier: 'full',
+    },
+  ]);
+
+  const matches = vocabulary.findMatchesInText('我们去看电影吧', ['IELTS'], {
+    vocabularyMode: 'core',
+  });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].word, 'movie');
+});
+
+test('findMatchesInText: 只要选中的等级存在 core 词条就不回退到 full', () => {
+  vocabulary.__setEntriesForTest([
+    { word: 'movie', meaning: '电影', aliases: ['电影'], level: 'CET4', coverageTier: 'core' },
+    { word: 'film', meaning: '电影', aliases: ['电影'], level: 'TOEFL', coverageTier: 'full' },
+  ]);
+
+  // CET4 carries a core row, so core mode stays strict even though TOEFL is
+  // also selected.
+  const matches = vocabulary.findMatchesInText('我们去看电影吧', ['CET4', 'TOEFL'], {
+    vocabularyMode: 'core',
+  });
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].level, 'CET4');
+});
+
+test('findMatchesInText: 全量模式不受 core 过滤影响', () => {
+  vocabulary.__setEntriesForTest([
+    { word: 'movie', meaning: '电影', aliases: ['电影'], level: 'CET4', coverageTier: 'core' },
+    { word: 'film', meaning: '电影', aliases: ['电影'], level: 'IELTS', coverageTier: 'full' },
+  ]);
+
+  const matches = vocabulary.findMatchesInText('我们去看电影吧', ['CET4', 'IELTS'], {
+    vocabularyMode: 'full',
+  });
+  assert.equal(matches.length, 1);
+  assert.ok(['movie', 'film'].includes(matches[0].word));
+});
+
+test('findMatchesInText: 不在匹配词表中的虚词不应被替换', () => {
+  vocabulary.__setEntriesForTest([
+    { word: 'one', meaning: '一个', aliases: ['一个'], level: 'CET4', coverageTier: 'core' },
+    { word: 'together', meaning: '一起', aliases: ['一起'], level: 'CET4', coverageTier: 'core' },
+    { word: 'fact', meaning: '其实', aliases: ['其实'], level: 'CET4', coverageTier: 'core' },
+  ]);
+
+  // isMatchableTerm rejects these before the index is built, so a stale or
+  // hand-edited alias cannot reintroduce function-word swaps.
+  const matches = vocabulary.findMatchesInText('其实我们一起去买一个吧', ['CET4'], {
+    vocabularyMode: 'core',
+  });
+  assert.deepEqual(matches, []);
+});

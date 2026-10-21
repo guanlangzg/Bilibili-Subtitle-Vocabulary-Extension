@@ -15,6 +15,23 @@ test('react overlay layout contract: overlay body should remain scrollable insid
     /\.bsv-overlay-panel\s*\{[\s\S]*display:\s*grid;[\s\S]*grid-template-rows:\s*auto 1fr;/
   );
   assert.match(stylesheet, /\.bsv-overlay-body\s*\{[\s\S]*overflow:\s*auto;/);
+  assert.match(
+    stylesheet,
+    /\.bsv-overlay-panel\[data-collapsed="true"\]\s*\{[\s\S]*width:\s*min\(360px/
+  );
+  assert.match(stylesheet, /\.bsv-overlay-tabs\s*\{/);
+  assert.match(stylesheet, /\.bsv-overlay-body\[data-active-tab="learn"\]/);
+});
+
+test('react overlay layout contract: overlay uses tabs and immediate commit instead of duplicate save action', () => {
+  const source = readProjectFile('react-ui/src/components/overlay-entry.tsx');
+
+  assert.match(source, /type OverlayTab = 'learn' \| 'controls' \| 'display'/);
+  assert.match(source, /className="bsv-overlay-tabs"/);
+  assert.match(source, /data-active-tab=\{activeTab\}/);
+  assert.match(source, /commitSettings\(/);
+  assert.doesNotMatch(source, /SaveIcon/);
+  assert.doesNotMatch(source, /保存中\.\.\.' : '保存'/);
 });
 
 test('react overlay layout contract: mountOverlayPanel should short-circuit when react root already exists', () => {

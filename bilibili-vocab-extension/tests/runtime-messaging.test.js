@@ -119,3 +119,33 @@ test('runtime messaging: sendRuntimeMessage should use typed fallback when respo
     /Runtime message failed: BILI_VOCAB_EXPERIENCE_RECORD_EVENT/
   );
 });
+
+test('runtime messaging: message type literals should match the react-ui copy', () => {
+  const reactSource = fs.readFileSync(
+    path.join(__dirname, '..', 'react-ui', 'src', 'lib', 'runtime-messaging.ts'),
+    'utf8'
+  );
+  const runtimeMessaging = loadRuntimeMessagingModule();
+
+  const reactTypes = {};
+  const objectMatch = reactSource.match(/export const MESSAGE_TYPES = \{([\s\S]*?)\}/);
+  assert.ok(objectMatch, 'react-ui MESSAGE_TYPES block should exist');
+  const pairPattern = /(\w+)\s*:\s*'([^']+)'/g;
+  let match = pairPattern.exec(objectMatch[1]);
+  while (match) {
+    reactTypes[match[1]] = match[2];
+    match = pairPattern.exec(objectMatch[1]);
+  }
+
+  assert.deepEqual(
+    Object.keys(reactTypes).sort(),
+    Object.keys(runtimeMessaging.MESSAGE_TYPES).sort()
+  );
+  Object.keys(runtimeMessaging.MESSAGE_TYPES).forEach((key) => {
+    assert.equal(
+      reactTypes[key],
+      runtimeMessaging.MESSAGE_TYPES[key],
+      `${key} should stay in sync`
+    );
+  });
+});

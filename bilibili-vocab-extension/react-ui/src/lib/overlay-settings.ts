@@ -6,6 +6,11 @@ import type {
   ReviewDanmakuSpeed,
   SettingsV3,
 } from './settings-normalizer';
+import {
+  applyProfileConfigPatch,
+  createSharedSettingsGuard,
+  listProfileOptionsWithLabels,
+} from './settings-bridge-core';
 
 type OverlaySharedSettingsApi = {
   SETTINGS_STORAGE_KEY_V3: string;
@@ -30,59 +35,8 @@ const PROFILE_LABELS: Record<BuiltinProfileId, string> = {
 const SHARED_SETTINGS_ERROR =
   'SharedSettings is required before React overlay settings bridge loads';
 
-function readSharedSettings(): OverlaySharedSettingsApi | undefined {
-  const globalShared =
-    typeof globalThis !== 'undefined'
-      ? (globalThis as typeof globalThis & { SharedSettings?: OverlaySharedSettingsApi })
-          .SharedSettings
-      : undefined;
-  const windowShared =
-    typeof window !== 'undefined'
-      ? (window as Window & { SharedSettings?: OverlaySharedSettingsApi }).SharedSettings
-      : undefined;
-  const shared = windowShared || globalShared;
-  return shared && typeof shared === 'object' ? shared : undefined;
-}
-
-function getSharedSettings(): OverlaySharedSettingsApi {
-  const shared = readSharedSettings();
-  if (!shared) {
-    throw new Error(SHARED_SETTINGS_ERROR);
-  }
-  return shared;
-}
-
-function requireSharedSettingsFunction<T extends (...args: never[]) => unknown>(
-  name: keyof OverlaySharedSettingsApi
-): T {
-  const value = shared[name];
-  if (typeof value !== 'function') {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} must be a function`);
-  }
-  return value as unknown as T;
-}
-
-function requireSharedSettingsArray<T>(name: keyof OverlaySharedSettingsApi): T[] {
-  const value = shared[name];
-  if (!Array.isArray(value)) {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} must be an array`);
-  }
-  return value.slice() as T[];
-}
-
-function requireSharedSettingsValue<T>(name: keyof OverlaySharedSettingsApi): T {
-  const value = shared[name];
-  if (value == null) {
-    throw new Error(`${SHARED_SETTINGS_ERROR}: ${String(name)} is missing`);
-  }
-  return value as T;
-}
-
-function cloneSettings(settings: SettingsV3): SettingsV3 {
-  return JSON.parse(JSON.stringify(settings)) as SettingsV3;
-}
-
-const shared = getSharedSettings();
+const { requireSharedSettingsFunction, requireSharedSettingsArray, requireSharedSettingsValue } =
+  createSharedSettingsGuard<OverlaySharedSettingsApi>(SHARED_SETTINGS_ERROR);
 
 // Legacy storage key retained for backward compatibility with existing installs.
 export const SETTINGS_STORAGE_KEY_V3 =
@@ -119,36 +73,22 @@ export function setActiveProfileConfig(
   profileId: ProfileId,
   patch: Partial<ProfileConfig>
 ): SettingsV3 {
-  const normalized = normalizeSettingsV3(settings);
-  const baseProfile = getProfileConfigById(normalized, profileId);
-  const nextProfile = requireSharedSettingsFunction<
-    OverlaySharedSettingsApi['normalizeProfileConfig']
-  >('normalizeProfileConfig')({
-    ...baseProfile,
-    ...patch,
-  });
-  const next = cloneSettings(normalized);
-  if (BUILTIN_PROFILE_IDS.includes(profileId as BuiltinProfileId)) {
-    next.profilesBuiltin[profileId as BuiltinProfileId] = nextProfile;
-  } else {
-    next.profilesCustom = next.profilesCustom.map((item) =>
-      item.id === profileId ? { ...item, config: nextProfile, updatedAt: Date.now() } : item
-    );
-  }
-  return normalizeSettingsV3(next);
+  return applyProfileConfigPatch(
+    {
+      builtinProfileIds: BUILTIN_PROFILE_IDS,
+      normalizeSettingsV3,
+      normalizeProfileConfig:
+        requireSharedSettingsFunction<OverlaySharedSettingsApi['normalizeProfileConfig']>(
+          'normalizeProfileConfig'
+        ),
+      getProfileConfigById,
+    },
+    settings,
+    profileId,
+    patch
+  );
 }
 
 export function listProfileOptions(settings: SettingsV3): ProfileOption[] {
-  const normalized = normalizeSettingsV3(settings);
-  const builtins: ProfileOption[] = BUILTIN_PROFILE_IDS.map((id) => ({
-    id,
-    name: PROFILE_LABELS[id],
-    builtin: true,
-  }));
-  const custom: ProfileOption[] = normalized.profilesCustom.map((item) => ({
-    id: item.id,
-    name: item.name,
-    builtin: false,
-  }));
-  return [...builtins, ...custom];
+  return listProfileOptionsWithLabels(BUILTIN_PROFILE_IDS, settings, (id) => PROFILE_LABELS[id]);
 }

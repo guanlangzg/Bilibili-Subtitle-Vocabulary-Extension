@@ -13,6 +13,14 @@ const OVERLAY_SETTINGS_SOURCE_PATH = path.join(
   'lib',
   'overlay-settings.ts'
 );
+const BRIDGE_CORE_SOURCE_PATH = path.join(
+  __dirname,
+  '..',
+  'react-ui',
+  'src',
+  'lib',
+  'settings-bridge-core.ts'
+);
 
 function transpileTsModule(sourcePath) {
   const source = fs.readFileSync(sourcePath, 'utf8');
@@ -25,6 +33,21 @@ function transpileTsModule(sourcePath) {
   }).outputText;
 }
 
+// settings-bridge-core.ts performs no SharedSettings access at load time, so
+// loading it into the sandbox keeps the load-failure semantics of the bridge.
+function loadBridgeCoreModule(sandbox) {
+  const coreCode = transpileTsModule(BRIDGE_CORE_SOURCE_PATH);
+  const coreModuleRef = { exports: {} };
+  const previousModule = sandbox.module;
+  const previousExports = sandbox.exports;
+  sandbox.module = coreModuleRef;
+  sandbox.exports = coreModuleRef.exports;
+  vm.runInNewContext(coreCode, sandbox, { filename: 'settings-bridge-core.js' });
+  sandbox.module = previousModule;
+  sandbox.exports = previousExports;
+  return coreModuleRef.exports;
+}
+
 function loadOverlaySettingsWithoutSharedSettings() {
   const overlayCode = transpileTsModule(OVERLAY_SETTINGS_SOURCE_PATH);
   const moduleRef = { exports: {} };
@@ -34,6 +57,9 @@ function loadOverlaySettingsWithoutSharedSettings() {
     require(id) {
       if (id === './settings-normalizer') {
         return {};
+      }
+      if (id === './settings-bridge-core') {
+        return loadBridgeCoreModule(sandbox);
       }
       return require(id);
     },

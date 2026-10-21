@@ -12,6 +12,8 @@ const uiTestPatterns = [
   /^contentScript-overlay-bridge\.test\.js$/,
   /^contentScript-overlay-loader\.test\.js$/,
   /^react-overlay-.*\.test\.js$/,
+  /^react-overlay-commit-merge-contract\.test\.js$/,
+  /^react-settings-.*\.test\.js$/,
   /^react-ui-.*\.test\.js$/,
   /^settings-layout\.test\.js$/,
 ];

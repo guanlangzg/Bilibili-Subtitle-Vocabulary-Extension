@@ -2,12 +2,14 @@
   // Legacy message namespaces retained for backward compatibility across extension components.
   const MESSAGE_TYPES = {
     SETTINGS_COMMIT: 'BILI_VOCAB_SETTINGS_COMMIT',
-    ADAPTIVE_MANUAL_OVERRIDE: 'BILI_VOCAB_ADAPTIVE_MANUAL_OVERRIDE',
     ADAPTIVE_PERSIST_FEEDBACK: 'BILI_VOCAB_ADAPTIVE_PERSIST_FEEDBACK',
     ADAPTIVE_SET_ENABLED: 'BILI_VOCAB_ADAPTIVE_SET_ENABLED',
     EXPERIENCE_RECORD_EVENT: 'BILI_VOCAB_EXPERIENCE_RECORD_EVENT',
     LEARNING_RECORD_HIT: 'BILI_VOCAB_LEARNING_RECORD_HIT',
     LEARNING_APPLY_REVIEW_FEEDBACK: 'BILI_VOCAB_LEARNING_APPLY_REVIEW_FEEDBACK',
+    LEARNING_SAVE_WORD: 'BILI_VOCAB_LEARNING_SAVE_WORD',
+    LEARNING_REMOVE_WORD: 'BILI_VOCAB_LEARNING_REMOVE_WORD',
+    LEARNING_CLEAR_VOCABULARY: 'BILI_VOCAB_LEARNING_CLEAR_VOCABULARY',
   };
 
   function hasRuntimeMessaging() {
@@ -16,6 +18,16 @@
       chrome.runtime &&
       typeof chrome.runtime.sendMessage === 'function'
     );
+  }
+
+  function isTrustedExtensionSender(sender) {
+    if (!sender || typeof sender !== 'object') {
+      return false;
+    }
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.id) {
+      return false;
+    }
+    return sender.id === chrome.runtime.id;
   }
 
   function toErrorMessage(error, fallbackMessage) {
@@ -64,6 +76,7 @@
   const api = {
     MESSAGE_TYPES,
     hasRuntimeMessaging,
+    isTrustedExtensionSender,
     sendRuntimeMessage,
   };
 

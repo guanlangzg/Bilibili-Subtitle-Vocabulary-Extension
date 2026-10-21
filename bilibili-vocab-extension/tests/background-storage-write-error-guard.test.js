@@ -22,6 +22,7 @@ function createChromeStub({ storageState, shouldFailSet, getBytesInUse, sendMess
   const removedKeys = [];
   const sentMessages = [];
   const runtime = {
+    id: 'bili-vocab-extension-id',
     lastError: null,
     onInstalled: {
       addListener(listener) {
@@ -110,6 +111,15 @@ async function withBackgroundRuntime(options, run) {
   const previousConsoleError = console.error;
   const stub = createChromeStub(options);
   const loggedErrors = [];
+  const modulePaths = [
+    backgroundPath,
+    path.join(__dirname, '..', 'background-storage.js'),
+    path.join(__dirname, '..', 'background-settings.js'),
+    path.join(__dirname, '..', 'background-message-handler.js'),
+    path.join(__dirname, '..', 'background-commands.js'),
+    path.join(__dirname, '..', 'background-learning-state.js'),
+    path.join(__dirname, '..', 'runtimeMessaging.js'),
+  ];
 
   try {
     global.chrome = stub.chrome;
@@ -117,6 +127,13 @@ async function withBackgroundRuntime(options, run) {
       loggedErrors.push(args);
     };
 
+    for (const modulePath of modulePaths) {
+      try {
+        delete require.cache[require.resolve(modulePath)];
+      } catch (_error) {
+        // Module may not be loaded yet.
+      }
+    }
     delete require.cache[require.resolve(backgroundPath)];
     const background = require(backgroundPath);
     await run({

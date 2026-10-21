@@ -5,6 +5,12 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 
 const { collectUiTestFiles } = require('./run-ui-tests.js');
+const {
+  createSpawnSpec,
+  formatCommand,
+  getPnpmCommand,
+  shouldSpawnWithShell,
+} = require('./lib/spawn-utils.js');
 
 const DEFAULT_PROJECT_ROOT = path.resolve(__dirname, '..');
 const DEFAULT_TESTS_DIR = path.join(DEFAULT_PROJECT_ROOT, 'tests');
@@ -48,12 +54,15 @@ const TEST_SHARD_DEFINITIONS = [
       /^background-storage-write-error-guard\.test\.js$/,
       /^config\.test\.js$/,
       /^experience-metrics\.test\.js$/,
+      /^golden-.*\.test\.js$/,
       /^learning-.*\.test\.js$/,
       /^runtime-messaging\.test\.js$/,
+      /^runtime-message-trust-boundary\.test\.js$/,
       /^settings-ui-state-machine\.test\.js$/,
       /^shared-settings.*\.test\.js$/,
-      /^utils\.test\.js$/,
+      /^utils(?:-.*)?\.test\.js$/,
       /^vocabulary.*\.test\.js$/,
+      /^zh-lexicon\.test\.js$/,
     ],
   },
   {
@@ -70,7 +79,6 @@ const TEST_SHARD_DEFINITIONS = [
       /^contentScript-web-text-safety\.test\.js$/,
       /^subtitle.*\.test\.js$/,
       /^renderer\.test\.js$/,
-      /^segmenter\.test\.js$/,
       /^translator\.test\.js$/,
       /^tooltip\.test\.js$/,
     ],
@@ -94,7 +102,7 @@ const TEST_SHARD_DEFINITIONS = [
       /^release-candidate-entry-contract\.test\.js$/,
       /^remote-test-entry-contract\.test\.js$/,
       /^permission-strategy-contract\.test\.js$/,
-      /^content-script-bundle-spike\.test\.js$/,
+      /^optimization-defaults-contract\.test\.js$/,
       /^check-extension-package\.test\.js$/,
       /^check-overlay-size\.test\.js$/,
       /^refresh-overlay-size-baseline\.test\.js$/,
@@ -107,10 +115,6 @@ const TEST_SHARD_DEFINITIONS = [
     ],
   },
 ];
-
-function getPnpmCommand(platform = process.platform) {
-  return platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-}
 
 function listTestFiles(targetTestsDir = DEFAULT_TESTS_DIR) {
   return fs
@@ -179,28 +183,6 @@ function buildNodeTestCommand(testFiles = []) {
   return testFiles.length > 0
     ? [`node --test ${testFiles.map((name) => `tests/${name}`).join(' ')}`]
     : [];
-}
-
-function quoteCommandPart(value) {
-  const text = String(value);
-  return /\s/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
-}
-
-function formatCommand(command, args = []) {
-  return [command, ...args].map(quoteCommandPart).join(' ');
-}
-
-function shouldSpawnWithShell(command, platform = process.platform) {
-  return platform === 'win32' && /\.(cmd|bat)$/i.test(String(command || ''));
-}
-
-function createSpawnSpec(command, args = [], options = {}) {
-  const useShell = shouldSpawnWithShell(command, options.platform);
-  return {
-    command: useShell ? formatCommand(command, args) : command,
-    args: useShell ? [] : args,
-    shell: useShell,
-  };
 }
 
 function tailText(value, maxChars = DEFAULT_MAX_LOG_CHARS) {

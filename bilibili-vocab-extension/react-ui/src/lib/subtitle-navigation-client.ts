@@ -1,6 +1,5 @@
 export {
   readActiveTabSubtitleStatus,
-  readActiveTabSubtitleNavigation,
   navigateActiveTabSubtitle,
   subscribeActiveTabSubtitleStatus,
 } from './storage';

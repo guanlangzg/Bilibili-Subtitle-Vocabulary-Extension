@@ -104,13 +104,11 @@ test('continuous optimization: createExecutionPlan should resolve gates and shar
       'background.test.js',
       'experience-metrics.test.js',
       'learning-state.test.js',
-      'settings-ui-state-machine.test.js',
       'shared-settings.test.js',
       'vocabulary.test.js',
       'contentScript-hit-tracking.test.js',
       'subtitleParser.test.js',
       'renderer.test.js',
-      'segmenter.test.js',
       'translator.test.js',
       'tooltip.test.js',
       'contentScript-overlay-bridge.test.js',
@@ -149,14 +147,11 @@ test('continuous optimization: createExecutionPlan should resolve gates and shar
       plan.shards.map((shard) => shard.name),
       ['runtime-state', 'subtitle-content', 'ui-overlay', 'build-contract-data']
     );
-    assert.equal(plan.shards[0].testFileCount, 8);
-    assert.ok(
-      plan.shards[0].testFiles.includes(path.join('tests', 'settings-ui-state-machine.test.js'))
-    );
+    assert.equal(plan.shards[0].testFileCount, 7);
     assert.ok(
       plan.shards[0].testFiles.includes(path.join('tests', 'shared-settings-integration.test.js'))
     );
-    assert.equal(plan.shards[1].testFileCount, 6);
+    assert.equal(plan.shards[1].testFileCount, 5);
     assert.deepEqual(plan.shards[2].testFiles, [
       path.join('tests', 'contentScript-overlay-bridge.test.js'),
       path.join('tests', 'react-overlay-layout-contract.test.js'),
@@ -253,14 +248,12 @@ test('continuous optimization: current shard plan should route runtime bridge an
     buildContractData.testFiles.filter((file) =>
       [
         'check-extension-package.test.js',
-        'content-script-bundle-spike.test.js',
         'extension-smoke-helpers.test.js',
         'remote-test-entry-contract.test.js',
       ].includes(path.basename(file))
     ),
     [
       path.join('tests', 'check-extension-package.test.js'),
-      path.join('tests', 'content-script-bundle-spike.test.js'),
       path.join('tests', 'extension-smoke-helpers.test.js'),
       path.join('tests', 'remote-test-entry-contract.test.js'),
     ]
@@ -310,7 +303,6 @@ test('continuous optimization: runContinuousOptimization should write reports an
       'contentScript-hit-tracking.test.js',
       'subtitleParser.test.js',
       'renderer.test.js',
-      'segmenter.test.js',
       'translator.test.js',
       'tooltip.test.js',
       'react-ui-contract.test.js',
@@ -389,7 +381,6 @@ test('continuous optimization: runContinuousOptimization should keep legacy popu
       'contentScript-hit-tracking.test.js',
       'subtitleParser.test.js',
       'renderer.test.js',
-      'segmenter.test.js',
       'translator.test.js',
       'tooltip.test.js',
       'react-ui-contract.test.js',
@@ -408,7 +399,6 @@ test('continuous optimization: runContinuousOptimization should keep legacy popu
       'refresh-overlay-size-baseline.test.js',
       'pack-extension.test.js',
       'test-coverage-entry-contract.test.js',
-      'settings-ui-state-machine.test.js',
       'browser-extension-smoke.spec.js',
       'extension-zip-smoke.spec.js',
       'real-site-smoke.spec.js',
@@ -496,7 +486,6 @@ test('continuous optimization: report-only mode should write coverage report wit
       'contentScript-hit-tracking.test.js',
       'subtitleParser.test.js',
       'renderer.test.js',
-      'segmenter.test.js',
       'translator.test.js',
       'tooltip.test.js',
       'react-ui-contract.test.js',
@@ -563,13 +552,16 @@ test('continuous optimization contract: package should expose only local shard a
 test('continuous optimization contract: ci workflow should generate report directly', () => {
   const workflow = readWorkflow('ci.yml');
 
-  assert.match(workflow, /^  continuous-optimization:\r?$/m);
+  assert.match(workflow, /^  continuous-optimization-inventory:\r?$/m);
   assert.match(
     workflow,
-    /continuous-optimization:[\s\S]*run: node scripts\/run-continuous-optimization\.js --report-only/
+    /continuous-optimization-inventory:[\s\S]*run: node scripts\/run-continuous-optimization\.js --report-only/
   );
-  assert.doesNotMatch(workflow, /continuous-optimization:[\s\S]*pnpm run optimize:continuous:ci/);
-  assert.doesNotMatch(workflow, /continuous-optimization:[\s\S]*--serial-shards/);
+  assert.doesNotMatch(
+    workflow,
+    /continuous-optimization-inventory:[\s\S]*pnpm run optimize:continuous:ci/
+  );
+  assert.doesNotMatch(workflow, /continuous-optimization-inventory:[\s\S]*--serial-shards/);
 });
 
 test('continuous optimization contract: ci workflow should upload continuous optimization reports', () => {
@@ -577,11 +569,11 @@ test('continuous optimization contract: ci workflow should upload continuous opt
 
   assert.match(
     workflow,
-    /continuous-optimization:[\s\S]*uses: actions\/upload-artifact@v4[\s\S]*name: continuous-optimization-report/
+    /continuous-optimization-inventory:[\s\S]*uses: actions\/upload-artifact@v4[\s\S]*name: continuous-optimization-inventory-report/
   );
   assert.match(
     workflow,
-    /continuous-optimization:[\s\S]*path: \$\{\{\s*env\.WORKDIR\s*\}\}\/test-results\/continuous-optimization/
+    /continuous-optimization-inventory:[\s\S]*path: \$\{\{\s*env\.WORKDIR\s*\}\}\/test-results\/continuous-optimization/
   );
 });
 

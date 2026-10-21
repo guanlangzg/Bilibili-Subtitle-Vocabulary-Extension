@@ -79,6 +79,7 @@
   let webTextReplacementController = null;
   let overlayLoaderController = null;
   let lifecycleMessagesWatching = false;
+  let lifecycleMessageHandler = null;
 
   const LRUCacheCtor =
     globalThis.Utils && typeof globalThis.Utils.LRUCache === 'function'
@@ -148,14 +149,16 @@
       targetCefr: hasMethod(globalThis.SubtitleTranslator, 'normalizeTargetCefr')
         ? globalThis.SubtitleTranslator.normalizeTargetCefr(source.targetCefr)
         : EFFECTIVE_DEFAULTS.targetCefr,
-      webPageEnabled: source.webPageEnabled !== false,
+      webPageEnabled: source.webPageEnabled === true,
       domainRules:
         source.domainRules && typeof source.domainRules === 'object' ? source.domainRules : {},
       schemaVersion: Number(source.schemaVersion) || 2,
       vocabularyMode: ['core', 'full'].includes(String(source.vocabularyMode || '').trim())
         ? String(source.vocabularyMode).trim()
         : EFFECTIVE_DEFAULTS.vocabularyMode,
-      examPreference: ['balanced', 'exam-first'].includes(String(source.examPreference || '').trim())
+      examPreference: ['balanced', 'exam-first'].includes(
+        String(source.examPreference || '').trim()
+      )
         ? String(source.examPreference).trim()
         : EFFECTIVE_DEFAULTS.examPreference,
       bilingualMode: ['default', 'bilingual', 'english-only'].includes(
@@ -186,7 +189,10 @@
       typeof sharedSettings.resolveEffectiveRuntime === 'function'
     ) {
       const nextV3 = sharedSettings.migrateToV3(stored);
+      const storedV3 =
+        stored && typeof stored === 'object' ? stored[SETTINGS_STORAGE_KEY_V3] : null;
       if (
+        JSON.stringify(storedV3) !== JSON.stringify(nextV3) &&
         typeof chrome !== 'undefined' &&
         chrome.storage &&
         chrome.storage.local &&
@@ -413,9 +419,6 @@
       translateText(text, runtimeSettings) {
         return globalThis.SubtitleTranslator.processSubtitle(text, runtimeSettings);
       },
-      renderToHtml(result, sourceText, runtimeSettings) {
-        return renderWebTextReplacementHtml(result, sourceText, runtimeSettings);
-      },
       normalizeText,
       isVideoSiteHost,
       scheduleProcess() {
@@ -527,32 +530,6 @@
     return subtitleNavigationController;
   }
 
-  // --- Web text helpers ---
-  function renderWebTextReplacementHtml(result, sourceText, runtimeSettings) {
-    if (
-      !webTextReplacementRuntime ||
-      typeof webTextReplacementRuntime.renderWebTextReplacementHtml !== 'function'
-    ) {
-      return '';
-    }
-    return webTextReplacementRuntime.renderWebTextReplacementHtml(
-      result,
-      sourceText,
-      runtimeSettings,
-      {
-        renderToHtml(nextResult, nextSourceText, nextSettings) {
-          if (
-            !globalThis.SubtitleRenderer ||
-            typeof globalThis.SubtitleRenderer.renderToHtml !== 'function'
-          ) {
-            return '';
-          }
-          return globalThis.SubtitleRenderer.renderToHtml(nextResult, nextSourceText, nextSettings);
-        },
-      }
-    );
-  }
-
   function containsUnsafeContent(root) {
     if (
       !webTextReplacementRuntime ||
@@ -631,16 +608,35 @@
 
   function teardownContentRuntime() {
     try {
+      // Stop chrome event listeners first so no settings change can
+      // resurrect observers, timers or video bindings after teardown.
+      if (
+        runtimeSettingsSyncController &&
+        typeof runtimeSettingsSyncController.stop === 'function'
+      ) {
+        runtimeSettingsSyncController.stop();
+      }
+      if (subtitleNavigationController && typeof subtitleNavigationController.stop === 'function') {
+        subtitleNavigationController.stop();
+      }
+      stopLifecycleMessages();
       getDomObserver().destroy();
       danmakuEngine.destroy();
       if (webTextReplacementController) {
         webTextReplacementController.clearPendingTimer();
       }
-      if (globalThis.TooltipModule && typeof globalThis.TooltipModule.hideTooltip === 'function') {
-        globalThis.TooltipModule.hideTooltip();
+      if (globalThis.TooltipModule && typeof globalThis.TooltipModule.destroy === 'function') {
+        globalThis.TooltipModule.destroy();
       }
       translationPipeline.clearTranslationCache();
       translationPipeline.invalidateRenderedSubtitles();
+      if (!isCommonJsRuntime) {
+        try {
+          delete globalThis[CONTENT_SCRIPT_INSTANCE_KEY];
+        } catch (_error) {
+          globalThis[CONTENT_SCRIPT_INSTANCE_KEY] = false;
+        }
+      }
     } catch (error) {
       logError('Content runtime teardown failed', error);
     }
@@ -659,6 +655,21 @@
     };
   }
 
+  function stopLifecycleMessages() {
+    const runtime = typeof chrome !== 'undefined' ? chrome.runtime : null;
+    if (
+      lifecycleMessagesWatching &&
+      lifecycleMessageHandler &&
+      runtime &&
+      runtime.onMessage &&
+      typeof runtime.onMessage.removeListener === 'function'
+    ) {
+      runtime.onMessage.removeListener(lifecycleMessageHandler);
+    }
+    lifecycleMessageHandler = null;
+    lifecycleMessagesWatching = false;
+  }
+
   function watchLifecycleMessages() {
     const runtime = typeof chrome !== 'undefined' ? chrome.runtime : null;
     if (
@@ -670,14 +681,31 @@
       return;
     }
     lifecycleMessagesWatching = true;
-    runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    lifecycleMessageHandler = (message, sender, sendResponse) => {
+      const runtimeMessaging = globalThis.RuntimeMessaging;
+      if (
+        runtimeMessaging &&
+        typeof runtimeMessaging.isTrustedExtensionSender === 'function' &&
+        !runtimeMessaging.isTrustedExtensionSender(sender)
+      ) {
+        return false;
+      }
+      if (
+        typeof chrome !== 'undefined' &&
+        chrome.runtime &&
+        chrome.runtime.id &&
+        (!sender || sender.id !== chrome.runtime.id)
+      ) {
+        return false;
+      }
       if (!message || message.type !== 'BILI_VOCAB_CONTENT_TEARDOWN') {
         return false;
       }
       teardownContentRuntime();
       sendResponse({ ok: true, payload: { stopped: true } });
       return true;
-    });
+    };
+    runtime.onMessage.addListener(lifecycleMessageHandler);
   }
 
   function hasRuntimeSettingsChange(changes) {
@@ -759,7 +787,6 @@
       buildRuntimeSettings,
       classifyRuntimeSettingsChange,
       createRenderSignature: translationPipeline.createRenderSignature,
-      createHitTrackingSignature: translationPipeline.createHitTrackingSignature,
       hasRuntimeSettingsChange,
       isRenderUpToDate: translationPipeline.isRenderUpToDate,
       shouldRunReviewDanmaku: danmakuEngine.shouldRunReviewDanmaku,
@@ -799,7 +826,6 @@
         return getDomObserver().shouldRunLegacyWebTextPipeline(...args);
       },
       shouldReplaceWebTextNode,
-      renderWebTextReplacementHtml,
       containsUnsafeContent,
       normalizeSubtitleNavigationAction: navBridge.normalizeSubtitleNavigationAction,
       findSubtitleNavigationIndices: navBridge.findSubtitleNavigationIndices,

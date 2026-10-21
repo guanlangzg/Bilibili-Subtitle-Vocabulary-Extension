@@ -124,6 +124,17 @@
     }
 
     chrome.storage.local.get(null, (storedSettings) => {
+      if (chrome.runtime && chrome.runtime.lastError) {
+        // Do not fall back to default settings on read failure; that could
+        // overwrite the user's existing configuration.
+        if (typeof logBackgroundError === 'function') {
+          logBackgroundError(
+            'Failed to read settings for initialization',
+            chrome.runtime.lastError
+          );
+        }
+        return;
+      }
       const normalizedLegacy = normalizeStoredSettings(storedSettings);
       const settingsV3 =
         sharedSettings && typeof sharedSettings.migrateToV3 === 'function'
@@ -171,13 +182,13 @@
     });
 
     if (chrome.runtime.onMessage && typeof chrome.runtime.onMessage.addListener === 'function') {
-      chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!modulesLoaded) {
           sendResponse({ ok: false, error: 'Background modules not loaded' });
           return false;
         }
         if (typeof handleBackgroundMessage === 'function') {
-          return handleBackgroundMessage(message, sendResponse);
+          return handleBackgroundMessage(message, sender, sendResponse);
         }
         return false;
       });

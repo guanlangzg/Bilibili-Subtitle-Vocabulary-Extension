@@ -1,32 +1,26 @@
-import { useMemo } from 'react';
+﻿import { useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/ui.css';
 import {
   cloneSettingsV3,
   getProfileConfigById,
   isDomainEnabled,
+  listProfileOptions,
   ProfileConfig,
   setExactDomainRuleEnabled,
   setActiveProfileConfig,
 } from '../lib/settings-bridge';
 import { getSiteToggleUiState } from '../lib/site-toggle-state';
-import {
-  ExperienceMetricsSnapshot,
-  openOptionsPage,
-  readAdaptiveTuningState,
-} from '../lib/settings-client';
+import { ExperienceMetricsSnapshot, openOptionsPage } from '../lib/settings-client';
 import { getRankingSummaryText } from '../lib/learning-dashboard';
 import { useDocumentTheme } from '../lib/bsv-theme';
 import { useV3Settings } from '../hooks/use-v3-settings';
-import { StudyPreview } from './study-preview';
-import { OnboardingPanel } from './onboarding';
 import { LoadingPanel, ErrorPanel } from './ui-shell';
 import { useQuickReview } from '../hooks/use-quick-review';
 import { useSubtitleStatus } from '../hooks/use-subtitle-status';
 import { useSitePermission } from '../hooks/use-site-permission';
 import { useAdaptiveTuning } from '../hooks/use-adaptive-tuning';
 import { useLearningStreak } from '../hooks/use-learning-streak';
-import { useOnboarding } from '../hooks/use-onboarding';
 import { useUndoAction } from '../hooks/use-undo-action';
 import {
   SiteControlSection,
@@ -38,7 +32,7 @@ import {
   ConflictSection,
   UndoSection,
 } from './popup-sections';
-import { ExternalLinkIcon, SaveIcon } from './icons';
+import { ExternalLinkIcon } from './icons';
 
 const EMPTY_EXPERIENCE_METRICS: ExperienceMetricsSnapshot = {
   windowDays: 7,
@@ -191,14 +185,17 @@ function PopupApp() {
 
   const { learningStreak } = useLearningStreak(setStatus);
 
-  const { onboardingState, onboardingBusy, completeOnboardingFlow } = useOnboarding(setStatus);
-
   const { pendingUndo, registerUndo, undoAction, clearUndo } = useUndoAction();
 
   const activeProfile = useMemo(() => {
     if (!working) return null;
     return getProfileConfigById(working, working.activeProfileId);
   }, [working]);
+
+  const profileOptions = useMemo(() => (working ? listProfileOptions(working) : []), [working]);
+  const activeProfileName =
+    profileOptions.find((item) => working && item.id === working.activeProfileId)?.name ||
+    '均衡输入';
 
   useDocumentTheme(activeProfile ? activeProfile.themeMode : 'auto');
 
@@ -239,22 +236,6 @@ function PopupApp() {
   const resolvedExperienceMetrics = experienceMetrics ?? EMPTY_EXPERIENCE_METRICS;
 
   const statusCodeText = statusCode ? `（${statusCode}）` : '';
-
-  async function onSave() {
-    const saveResult = await save('策略已保存。');
-    if (!saveResult) return;
-    clearUndo();
-    try {
-      const nextAdaptive = await readAdaptiveTuningState();
-      setStatus(
-        saveResult.preservedLocalEdits
-          ? `最近一次保存已完成，当前仍有未保存修改。${nextAdaptive.hint}`
-          : `策略已保存。${nextAdaptive.hint}`
-      );
-    } catch {
-      setStatus('策略已保存，但自动调优状态刷新失败，请稍后重试。');
-    }
-  }
 
   async function onToggleCurrentSite() {
     if (!working || siteToggleState.buttonDisabled) {
@@ -339,91 +320,26 @@ function PopupApp() {
 
   return (
     <main className="popup-shell">
-      <section className="studio-hero stagger-enter">
-        <div className="inline wrap">
-          <div>
-            <span className="studio-eyebrow">Quick Control</span>
-            <h1 className="studio-title">字幕学习助手</h1>
-            <p className="studio-subtitle">
-              当前站点：{hostname || '未识别'} · {siteStatus.badge}
-            </p>
-          </div>
-          <button type="button" className="btn primary" onClick={() => void openOptionsPage()}>
-            <ExternalLinkIcon size={14} />
-            打开设置
-          </button>
+      <header className="popup-appbar">
+        <div className="popup-brand">
+          <span className="popup-brand__mark">SV</span>
+          <span>
+            <strong>字幕学习助手</strong>
+            <small>
+              {activeProfileName} · {dirty ? '有未保存修改' : '已同步'}
+            </small>
+          </span>
         </div>
-      </section>
-
-      <OnboardingPanel
-        state={onboardingState}
-        busyGoal={onboardingBusy}
-        onSelectGoal={(goal) => void completeOnboardingFlow(goal, working, save, setWorkingDirect)}
-        onDismiss={() => void completeOnboardingFlow(null, working, save, setWorkingDirect)}
-      />
-
-      <section className="panel stack stagger-enter">
-        <StudyPreview
-          profile={activeProfile}
-          title="实时学习预览"
-          subtitle="当前页面会按这个配置档渲染字幕和复习弹幕。"
-          sentenceVariant="popup"
-          compact
-        />
-        <div className="grid-two">
-          <div className="field">
-            <label htmlFor="popupBilingualMode">显示模式</label>
-            <select
-              id="popupBilingualMode"
-              value={activeProfile.bilingualMode}
-              onChange={(event) =>
-                void updatePopupProfile({
-                  bilingualMode: event.target.value as ProfileConfig['bilingualMode'],
-                })
-              }
-              disabled={saving}
-            >
-              {BILINGUAL_MODE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label htmlFor="popupThemeMode">主题模式</label>
-            <select
-              id="popupThemeMode"
-              value={activeProfile.themeMode}
-              onChange={(event) =>
-                void updatePopupProfile({
-                  themeMode: event.target.value as ProfileConfig['themeMode'],
-                })
-              }
-              disabled={saving}
-            >
-              {THEME_MODE_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        </div>
-        <div className="btn-row">
-          <button
-            type="button"
-            className="btn primary"
-            onClick={() => void onSave()}
-            disabled={saving}
-            aria-busy={saving}
-            data-dirty={dirty || undefined}
-          >
-            <SaveIcon size={14} />
-            {saving ? '保存中...' : dirty ? '保存策略' : '策略已同步'}
-          </button>
-        </div>
-      </section>
+        <button
+          type="button"
+          className="icon-btn"
+          aria-label="打开设置"
+          title="打开设置"
+          onClick={() => void openOptionsPage()}
+        >
+          <ExternalLinkIcon size={15} />
+        </button>
+      </header>
 
       <SiteControlSection
         hostname={hostname}
@@ -450,38 +366,84 @@ function PopupApp() {
         <UndoSection pendingUndo={pendingUndo} saving={saving} onUndo={onUndoPendingAction} />
       )}
 
-      <AdaptiveTuningSection
-        adaptiveState={adaptiveState}
-        experienceMetrics={resolvedExperienceMetrics}
-        adaptiveBusy={adaptiveBusy}
-        onToggleAdaptive={onToggleAdaptive}
-      />
+      <section className="popup-primary-flow">
+        <TodayMetricsSection summary={summary} learningStreak={learningStreak} />
 
-      <SubtitleNavSection
-        subtitleNavigation={subtitleNavigation}
-        subtitleActionBusy={subtitleActionBusy}
-        onNavigateSubtitle={onNavigateSubtitle}
-        canUseSubtitleAction={canUseSubtitleAction}
-      />
+        <QuickReviewSection
+          quickReviewCard={quickReviewCard}
+          summary={summary}
+          reviewSubmitting={reviewSubmitting}
+          quickReviewItemsLength={quickReview.items.length}
+          cycleQuickReviewCard={cycleQuickReviewCard}
+          handleQuickReviewAction={handleQuickReviewAction}
+        />
 
-      <QuickReviewSection
-        quickReviewCard={quickReviewCard}
-        summary={summary}
-        reviewSubmitting={reviewSubmitting}
-        quickReviewItemsLength={quickReview.items.length}
-        cycleQuickReviewCard={cycleQuickReviewCard}
-        handleQuickReviewAction={handleQuickReviewAction}
-      />
+        <SubtitleNavSection
+          subtitleNavigation={subtitleNavigation}
+          subtitleActionBusy={subtitleActionBusy}
+          onNavigateSubtitle={onNavigateSubtitle}
+          canUseSubtitleAction={canUseSubtitleAction}
+        />
+      </section>
 
-      <WordRankingSection
-        encounteredRanking={encounteredRanking}
-        rankingSortMode={rankingSortMode}
-        rankingSummary={rankingSummary}
-        learningStreak={learningStreak}
-        setRankingSortMode={setRankingSortMode}
-      />
-
-      <TodayMetricsSection summary={summary} learningStreak={learningStreak} />
+      <details className="popup-more" open={Boolean(conflict || feedback?.stage === 'error')}>
+        <summary>更多控制与学习统计</summary>
+        <section className="panel stack">
+          <div className="grid-two">
+            <div className="field">
+              <label htmlFor="popupBilingualMode">显示模式</label>
+              <select
+                id="popupBilingualMode"
+                value={activeProfile.bilingualMode}
+                onChange={(event) =>
+                  void updatePopupProfile({
+                    bilingualMode: event.target.value as ProfileConfig['bilingualMode'],
+                  })
+                }
+                disabled={saving}
+              >
+                {BILINGUAL_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label htmlFor="popupThemeMode">主题模式</label>
+              <select
+                id="popupThemeMode"
+                value={activeProfile.themeMode}
+                onChange={(event) =>
+                  void updatePopupProfile({
+                    themeMode: event.target.value as ProfileConfig['themeMode'],
+                  })
+                }
+                disabled={saving}
+              >
+                {THEME_MODE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </section>
+        <AdaptiveTuningSection
+          adaptiveState={adaptiveState}
+          experienceMetrics={resolvedExperienceMetrics}
+          adaptiveBusy={adaptiveBusy}
+          onToggleAdaptive={onToggleAdaptive}
+        />
+        <WordRankingSection
+          encounteredRanking={encounteredRanking}
+          rankingSortMode={rankingSortMode}
+          rankingSummary={rankingSummary}
+          learningStreak={learningStreak}
+          setRankingSortMode={setRankingSortMode}
+        />
+      </details>
 
       <section
         className="panel stack stagger-enter"

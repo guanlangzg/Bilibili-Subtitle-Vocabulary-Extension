@@ -506,75 +506,6 @@
     return result;
   }
 
-  async function persistManualOverride(options = {}) {
-    if (
-      runtimeMessaging &&
-      typeof runtimeMessaging.sendRuntimeMessage === 'function' &&
-      typeof runtimeMessaging.hasRuntimeMessaging === 'function' &&
-      runtimeMessaging.hasRuntimeMessaging()
-    ) {
-      return runtimeMessaging.sendRuntimeMessage(
-        runtimeMessaging.MESSAGE_TYPES.ADAPTIVE_MANUAL_OVERRIDE,
-        {
-          options: { ...(options || {}) },
-        }
-      );
-    }
-
-    const now = normalizeTimestamp(options.now) || Date.now();
-    const durationMs = Math.max(
-      60 * 1000,
-      Math.floor(Number(options.durationMs) || MANUAL_OVERRIDE_MS)
-    );
-    const payload = await readStorage([STORAGE_KEYS.STATE]);
-    const nextState = markManualOverride(payload[STORAGE_KEYS.STATE], now, durationMs);
-    await writeStorage({
-      [STORAGE_KEYS.STATE]: nextState,
-    });
-    recordExperienceMetric('adaptive-manual-override', { now });
-    return nextState;
-  }
-
-  async function recordAdaptiveToggle(enabled, options = {}) {
-    if (
-      runtimeMessaging &&
-      typeof runtimeMessaging.sendRuntimeMessage === 'function' &&
-      typeof runtimeMessaging.hasRuntimeMessaging === 'function' &&
-      runtimeMessaging.hasRuntimeMessaging()
-    ) {
-      await runtimeMessaging.sendRuntimeMessage(
-        runtimeMessaging.MESSAGE_TYPES.EXPERIENCE_RECORD_EVENT,
-        {
-          type: 'adaptive-toggle',
-          options: {
-            ...(options || {}),
-            enabled: enabled !== false,
-          },
-        }
-      );
-      return true;
-    }
-
-    const now = normalizeTimestamp(options.now) || Date.now();
-    recordExperienceMetric('adaptive-toggle', {
-      enabled: enabled !== false,
-      now,
-    });
-    return true;
-  }
-
-  function getAdaptiveHint(state, now = Date.now()) {
-    const normalized = normalizeState(state);
-    const timestamp = normalizeTimestamp(now) || Date.now();
-    if (!normalized.enabled) {
-      return '自动调优已关闭';
-    }
-    if (normalized.manualOverrideUntil != null && normalized.manualOverrideUntil > timestamp) {
-      return '当前为手动配置优先';
-    }
-    return '已启用自动调优';
-  }
-
   const api = {
     STORAGE_KEYS,
     DEFAULT_STATE,
@@ -587,9 +518,6 @@
     decideAdjustment,
     applyFeedbackToPayload,
     persistFeedback,
-    persistManualOverride,
-    recordAdaptiveToggle,
-    getAdaptiveHint,
   };
 
   globalScope.AdaptiveTuning = api;

@@ -22,6 +22,9 @@ test('options layout: should assert the shipped react options entry instead of l
   assert.equal(manifest.options_page, 'dist/options.html');
   assert.match(optionsHtml, /id="root"/);
   assert.match(optionsHtml, /src="\/src\/components\/options-main\.tsx"/);
+  assert.match(optionsSource, /className="settings-toolbar"/);
+  assert.match(optionsSource, /className="settings-nav__icon"/);
+  assert.doesNotMatch(optionsSource, /className="studio-hero settings-hero"/);
   assert.match(combinedOptions, /字幕学习设置/);
   assert.match(combinedOptions, /基础设置/);
   assert.match(combinedOptions, /学习策略/);
@@ -52,10 +55,12 @@ test('popup layout: should assert the shipped react popup entry instead of legac
   assert.equal(manifest.action && manifest.action.default_popup, 'dist/popup.html');
   assert.match(popupHtml, /id="root"/);
   assert.match(popupHtml, /src="\/src\/components\/popup-main\.tsx"/);
+  assert.match(popupSource, /className="popup-appbar"/);
+  assert.match(popupSource, /className="popup-primary-flow"/);
+  assert.match(popupSource, /<details className="popup-more"/);
   assert.match(combinedPopup, /字幕学习助手/);
   assert.match(combinedPopup, /当前站点控制/);
-  assert.match(combinedPopup, /实时学习预览/);
-  assert.match(combinedPopup, /StudyPreview/);
+  assert.doesNotMatch(popupSource, /<StudyPreview/);
   assert.match(combinedPopup, /快速复习/);
   assert.match(combinedPopup, /今日关键指标/);
   assert.match(combinedPopup, /连续学习/);
@@ -64,11 +69,14 @@ test('popup layout: should assert the shipped react popup entry instead of legac
   assert.match(combinedPopup, /打开设置/);
 });
 
-test('shared styles: should define dashboard shell and single-column options layout', () => {
-  const stylesheet = readProjectFile('styles.css');
+test('shared styles: should define Apple Utility task-first layout tokens', () => {
+  const stylesheet = readProjectFile('react-ui/src/styles/ui.css');
+  const tokens = readProjectFile('react-ui/src/styles/tokens.css');
 
-  assert.match(stylesheet, /\.hub-page\s*\{/);
-  assert.match(stylesheet, /\.hub-app-shell--single-column\s*\{/);
-  assert.match(stylesheet, /\.hub-panel\s*\{/);
-  assert.match(stylesheet, /\.hub-topbar__metrics\s*\{/);
+  assert.match(stylesheet, /\.popup-primary-flow\s*\{/);
+  assert.match(stylesheet, /\.settings-toolbar\s*\{/);
+  assert.match(tokens, /--bsv-bg:\s*#f5f5f7/i);
+  assert.match(tokens, /--bsv-accent:\s*#0071e3/i);
+  assert.doesNotMatch(tokens, /Newsreader/);
+  assert.doesNotMatch(tokens, /--bsv-letter-spacing-tight:\s*-/);
 });

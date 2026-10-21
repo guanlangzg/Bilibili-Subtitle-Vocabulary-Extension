@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef, startTransition } from 'react';
 import { createRoot } from 'react-dom/client';
 import overlayCss from '../styles/overlay.css?inline';
 import uiShellCss from '../styles/ui-shell.css?inline';
@@ -15,7 +15,6 @@ import {
   setActiveProfileConfig,
 } from '../lib/overlay-settings';
 import {
-  saveOverlaySettingsV3,
   readLearningSummary,
   LearningSummary,
   subscribeLearningSummary,
@@ -34,7 +33,6 @@ import {
 } from '../lib/subtitle-navigation';
 import { getThemeModeLabel, THEME_MODE_OPTIONS, useResolvedTheme } from '../lib/bsv-theme';
 import { useOverlaySettings } from '../hooks/use-overlay-settings';
-import { startTransition, useRef } from 'react';
 import {
   BookIcon,
   ChevronLeftIcon,
@@ -43,11 +41,19 @@ import {
   ExpandIcon,
   HideIcon,
   ReplayIcon,
-  SaveIcon,
 } from './icons';
 
 const ROOT_ID = 'bsv-react-overlay-root';
 const STYLE_ID = 'bsv-react-overlay-style';
+const PROFILE_COMMIT_DEBOUNCE_MS = 320;
+const SAVE_FAILED_PATTERN = /失败/;
+type OverlayTab = 'learn' | 'controls' | 'display';
+
+const OVERLAY_TABS: Array<{ id: OverlayTab; label: string }> = [
+  { id: 'learn', label: '学习' },
+  { id: 'controls', label: '控制' },
+  { id: 'display', label: '显示' },
+];
 
 interface SubtitleParserApi {
   loadSubtitleTimeline?: () => Promise<unknown>;
@@ -60,6 +66,16 @@ function asNumber(value: string, fallback: number): number {
 
 function clampOffset(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(value)));
+}
+
+function getReviewDanmakuSpeedLabel(speed: ProfileConfig['reviewDanmakuSpeed'] | string): string {
+  if (speed === 'slow') {
+    return '慢速';
+  }
+  if (speed === 'fast') {
+    return '快速';
+  }
+  return '标准';
 }
 
 function getReviewDensityLabel(density: ProfileConfig['reviewDanmakuDensity']): string {
@@ -117,13 +133,12 @@ function OverlayApp() {
     working: settings,
     loading,
     saving,
-    dirty,
     status,
     error,
     setStatus,
-    setWorkingDirect,
+    commit,
+    commitFromUpdater,
     mutateWorking,
-    save,
     reload,
   } = useOverlaySettings({
     initialStatus: '加载中...',
@@ -134,12 +149,24 @@ function OverlayApp() {
     masteredCount: 0,
     recentWords: [],
   });
-  const initialSubtitlePayload = readInitialSubtitleNavigationPayload(hostname);
+  const [activeTab, setActiveTab] = useState<OverlayTab>('learn');
+  // Lazy initializer: only read the bridge/DOM once, not on every re-render.
+  const [initialSubtitlePayload] = useState(() => readInitialSubtitleNavigationPayload(hostname));
   const subtitleTimelineRef = useRef<SubtitleTimelineItem[]>([]);
   const subtitleVideoKeyRef = useRef(initialSubtitlePayload.videoKey);
+  const profileCommitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [subtitleNavigation, setSubtitleNavigation] = useState<SubtitleNavigationState>(
     initialSubtitlePayload.state
   );
+
+  useEffect(() => {
+    return () => {
+      if (profileCommitTimerRef.current) {
+        clearTimeout(profileCommitTimerRef.current);
+        profileCommitTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -238,10 +265,21 @@ function OverlayApp() {
     return null;
   }
 
-  const overlayState = settings.globalControls.overlayState;
+  const currentSettings = settings;
+  const overlayState = currentSettings.globalControls.overlayState;
 
-  function mutateSettings(updater: (draft: SettingsV3) => SettingsV3) {
-    mutateWorking((draft) => normalizeSettingsV3(updater(draft)));
+  async function commitSettings(updater: (draft: SettingsV3) => SettingsV3, message: string) {
+    await commitFromUpdater(updater, message);
+  }
+
+  function scheduleProfileCommit(message = '学习设置已保存。') {
+    if (profileCommitTimerRef.current) {
+      clearTimeout(profileCommitTimerRef.current);
+    }
+    profileCommitTimerRef.current = setTimeout(() => {
+      profileCommitTimerRef.current = null;
+      void commitFromUpdater((draft) => draft, message);
+    }, PROFILE_COMMIT_DEBOUNCE_MS);
   }
 
   async function ensureSubtitleTimelineReady(): Promise<SubtitleTimelineItem[]> {
@@ -278,32 +316,24 @@ function OverlayApp() {
     setStatus(`${message}（${seekedAt.toFixed(1)}s）`);
   }
 
-  function patchProfile(patch: Partial<ProfileConfig>) {
+  function patchProfile(patch: Partial<ProfileConfig>, options: { immediate?: boolean } = {}) {
     mutateWorking((draft) => setActiveProfileConfig(draft, draft.activeProfileId, patch));
+    if (options.immediate) {
+      if (profileCommitTimerRef.current) {
+        clearTimeout(profileCommitTimerRef.current);
+        profileCommitTimerRef.current = null;
+      }
+      void commitFromUpdater((draft) => draft, '学习设置已保存。');
+      return;
+    }
+    scheduleProfileCommit('学习设置已保存。');
   }
 
   function patchOverlayState(patch: Partial<SettingsV3['globalControls']['overlayState']>) {
-    mutateSettings((draft) => {
-      draft.globalControls.overlayState = {
-        ...draft.globalControls.overlayState,
-        ...patch,
-      };
+    void commitSettings((draft) => {
+      draft.globalControls.overlayState = { ...draft.globalControls.overlayState, ...patch };
       return draft;
-    });
-  }
-
-  async function persist(message: string) {
-    await save(message);
-  }
-
-  async function persistImmediate(next: SettingsV3, message: string) {
-    try {
-      const persisted = await saveOverlaySettingsV3(next);
-      setWorkingDirect(persisted);
-      setStatus(message);
-    } catch {
-      setStatus('保存失败，请重试。');
-    }
+    }, '悬浮面板设置已保存。');
   }
 
   const hideOverlay = async () => {
@@ -317,7 +347,7 @@ function OverlayApp() {
         },
       },
     });
-    await persistImmediate(next, '已隐藏悬浮面板。');
+    await commit(next, '已隐藏悬浮面板。');
   };
 
   const showOverlay = async () => {
@@ -331,7 +361,7 @@ function OverlayApp() {
         },
       },
     });
-    await persistImmediate(next, '悬浮面板已恢复。');
+    await commit(next, '悬浮面板已恢复。');
   };
 
   if (overlayState.hidden) {
@@ -390,8 +420,22 @@ function OverlayApp() {
           </div>
         </header>
         {!overlayState.collapsed && (
-          <div className="bsv-overlay-body">
-            <section className="bsv-card bsv-stats-card">
+          <div className="bsv-overlay-body" data-active-tab={activeTab}>
+            <nav className="bsv-overlay-tabs" aria-label="悬浮面板内容">
+              {OVERLAY_TABS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  className="bsv-overlay-tab"
+                  aria-selected={activeTab === tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </nav>
+
+            <section className="bsv-tab-section bsv-tab-section--learn bsv-card bsv-stats-card">
               <h4>今日学习进度</h4>
               <div className="bsv-stats-grid">
                 <div className="bsv-stat-item">
@@ -430,7 +474,7 @@ function OverlayApp() {
               </div>
             </section>
 
-            <section className="bsv-card bsv-subtitle-card">
+            <section className="bsv-tab-section bsv-tab-section--learn bsv-card bsv-subtitle-card">
               <div className="bsv-subtitle-head">
                 <div className="bsv-subtitle-copy">
                   <h4>字幕导航</h4>
@@ -481,7 +525,7 @@ function OverlayApp() {
               </div>
             </section>
 
-            <section className="bsv-card">
+            <section className="bsv-tab-section bsv-tab-section--controls bsv-card">
               <h4>配置档与学习强度</h4>
               <div className="bsv-row">
                 <div className="bsv-field">
@@ -490,10 +534,10 @@ function OverlayApp() {
                     id="bsvProfile"
                     value={String(settings.activeProfileId)}
                     onChange={(event) => {
-                      mutateSettings((draft) => {
+                      void commitSettings((draft) => {
                         draft.activeProfileId = event.target.value;
                         return draft;
-                      });
+                      }, '配置档已切换。');
                     }}
                   >
                     {profileOptions.map((item) => (
@@ -519,6 +563,8 @@ function OverlayApp() {
                         replaceRatio: asNumber(event.target.value, profile.replaceRatio),
                       })
                     }
+                    onMouseUp={() => scheduleProfileCommit('学习设置已保存。')}
+                    onTouchEnd={() => scheduleProfileCommit('学习设置已保存。')}
                   />
                 </div>
               </div>
@@ -532,9 +578,12 @@ function OverlayApp() {
                     max={5}
                     value={profile.maxReplaceCount}
                     onChange={(event) =>
-                      patchProfile({
-                        maxReplaceCount: asNumber(event.target.value, profile.maxReplaceCount),
-                      })
+                      patchProfile(
+                        {
+                          maxReplaceCount: asNumber(event.target.value, profile.maxReplaceCount),
+                        },
+                        { immediate: true }
+                      )
                     }
                   />
                 </div>
@@ -555,7 +604,7 @@ function OverlayApp() {
               </div>
             </section>
 
-            <section className="bsv-card">
+            <section className="bsv-tab-section bsv-tab-section--controls bsv-card">
               <h4>运行开关</h4>
               <div className="bsv-row">
                 <label className="bsv-switch">
@@ -584,10 +633,10 @@ function OverlayApp() {
                     type="checkbox"
                     checked={settings.globalControls.webPageEnabled}
                     onChange={(event) => {
-                      mutateSettings((draft) => {
+                      void commitSettings((draft) => {
                         draft.globalControls.webPageEnabled = event.target.checked;
                         return draft;
-                      });
+                      }, '页面正文模式已保存。');
                     }}
                   />
                 </label>
@@ -603,10 +652,10 @@ function OverlayApp() {
                     type="checkbox"
                     checked={settings.globalControls.reviewDanmakuEnabled}
                     onChange={(event) => {
-                      mutateSettings((draft) => {
+                      void commitSettings((draft) => {
                         draft.globalControls.reviewDanmakuEnabled = event.target.checked;
                         return draft;
-                      });
+                      }, '复习弹幕设置已保存。');
                     }}
                   />
                 </label>
@@ -616,14 +665,17 @@ function OverlayApp() {
                     id="bsvSpeed"
                     value={profile.reviewDanmakuSpeed}
                     onChange={(event) =>
-                      patchProfile({
-                        reviewDanmakuSpeed: event.target.value as 'slow' | 'normal' | 'fast',
-                      })
+                      patchProfile(
+                        {
+                          reviewDanmakuSpeed: event.target.value as 'slow' | 'normal' | 'fast',
+                        },
+                        { immediate: true }
+                      )
                     }
                   >
                     {REVIEW_SPEEDS.map((item) => (
                       <option key={item} value={item}>
-                        {item}
+                        {getReviewDanmakuSpeedLabel(item)}
                       </option>
                     ))}
                   </select>
@@ -634,10 +686,13 @@ function OverlayApp() {
                     id="bsvDensity"
                     value={profile.reviewDanmakuDensity}
                     onChange={(event) =>
-                      patchProfile({
-                        reviewDanmakuDensity: event.target
-                          .value as ProfileConfig['reviewDanmakuDensity'],
-                      })
+                      patchProfile(
+                        {
+                          reviewDanmakuDensity: event.target
+                            .value as ProfileConfig['reviewDanmakuDensity'],
+                        },
+                        { immediate: true }
+                      )
                     }
                   >
                     {REVIEW_DENSITIES.map((item) => (
@@ -668,7 +723,7 @@ function OverlayApp() {
               </div>
             </section>
 
-            <section className="bsv-card">
+            <section className="bsv-tab-section bsv-tab-section--display bsv-card">
               <h4>面板位置</h4>
               <div className="bsv-shift">
                 <button
@@ -721,7 +776,7 @@ function OverlayApp() {
             <footer className="bsv-overlay-foot">
               <span
                 className="bsv-status"
-                aria-live={error ? 'assertive' : 'polite'}
+                aria-live={SAVE_FAILED_PATTERN.test(status) ? 'assertive' : 'polite'}
                 aria-atomic="true"
               >
                 {status}
@@ -731,17 +786,7 @@ function OverlayApp() {
                   <HideIcon size={14} />
                   隐藏面板
                 </button>
-                <button
-                  type="button"
-                  className="bsv-btn bsv-btn-primary"
-                  onClick={() => void persist('已保存到扩展设置。')}
-                  disabled={!dirty || saving}
-                  aria-busy={saving}
-                  data-dirty={dirty || undefined}
-                >
-                  <SaveIcon size={14} />
-                  {saving ? '保存中...' : '保存'}
-                </button>
+                {saving && <span className="bsv-saving-pill">保存中...</span>}
               </div>
             </footer>
           </div>

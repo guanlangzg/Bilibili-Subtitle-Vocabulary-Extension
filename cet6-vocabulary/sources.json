@@ -1,0 +1,141 @@
+{
+  "collectedAt": "2026-10-18",
+  "scope": "CET-4/CET-6 考纲词汇构建来源",
+  "buildManifest": "../bilibili-vocab-extension/data/sources.json",
+  "categories": [
+    {
+      "id": "syllabus-2016",
+      "path": "syllabus-2016/",
+      "label": "考纲词表",
+      "description": "《全国大学英语四、六级考试大纲（2016年修订版）》四级/六级词表，构建时用于考纲词目判定与缺失词补齐。"
+    },
+    {
+      "id": "dictionary",
+      "path": "dictionary/",
+      "label": "释义词典",
+      "description": "释义、音标、词性、中文别名与 CEFR 等级来源。原始文件体积较大或为多等级共用，保留在 bilibili-vocab-extension/sources/ 根目录，此处仅登记。"
+    },
+    {
+      "id": "exam-ranking",
+      "path": "exam-ranking/",
+      "label": "考试词频",
+      "description": "考试词频与优先级排序来源。原始文件保留在 bilibili-vocab-extension/sources/ 根目录，此处仅登记。"
+    },
+    {
+      "id": "licenses",
+      "path": "licenses/",
+      "label": "许可证原文",
+      "description": "上游许可证文本，作为许可状态核验证据，不参与构建。"
+    }
+  ],
+  "sources": [
+    {
+      "name": "CET 考试大纲词表 via ismartcoding/endict",
+      "category": "syllabus-2016",
+      "url": "https://github.com/ismartcoding/endict",
+      "license": "MIT",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "verifiedAt": "2026-10-18",
+      "evidence": "仓库 LICENSE 为 MIT License, Copyright (c) 2022 SmartCoding；README 声明四六级词表来自《全国大学英语四、六级考试大纲（2016年版）》。",
+      "files": ["syllabus-2016/cet4.json", "syllabus-2016/cet6.json"],
+      "notes": "四级 6127 条、六级 1715 条，含 14 条多词短语。构建时标记 syllabus 来源并补齐考纲缺失词。"
+    },
+    {
+      "name": "ECDICT",
+      "category": "dictionary",
+      "url": "https://github.com/skywind3000/ECDICT",
+      "license": "MIT",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "verifiedAt": "2026-10-18",
+      "evidence": "仓库 LICENSE 为 MIT；构建清单 data/sources.json 标记为 verified 且不阻断发布。",
+      "files": ["../bilibili-vocab-extension/sources/ecdict.csv"],
+      "notes": "提供四六级词条释义、音标、词性、词频，并含 cet4/cet6/ielts/toefl/ky 标签。"
+    },
+    {
+      "name": "Words-CEFR-Dataset",
+      "category": "dictionary",
+      "url": "https://github.com/Maximax67/Words-CEFR-Dataset",
+      "license": "MIT",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "verifiedAt": "2026-10-18",
+      "evidence": "构建清单 data/sources.json 标记为 verified 且不阻断发布。",
+      "files": [
+        "../bilibili-vocab-extension/sources/words.csv",
+        "../bilibili-vocab-extension/sources/word_pos.csv"
+      ],
+      "notes": "按词与词性提供 CEFR 数值等级 (1-6) 与频率，用于 cefrLevel/cefrRank。"
+    },
+    {
+      "name": "CC-CEDICT",
+      "category": "dictionary",
+      "url": "https://www.mdbg.net/chinese/dictionary?page=cc-cedict",
+      "license": "CC BY-SA 3.0 (MDBG 发布版本)",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": true,
+      "verifiedAt": "2026-10-18",
+      "evidence": "构建清单 data/sources.json 标记为 verified；协议要求署名并相同方式共享。",
+      "files": ["../bilibili-vocab-extension/sources/cedict_ts.u8.gz"],
+      "notes": "提供中文别名 (aliases) 补充，发布包需保留署名与同协议说明。"
+    },
+    {
+      "name": "KyleBing/english-vocabulary",
+      "category": "exam-ranking",
+      "url": "https://github.com/KyleBing/english-vocabulary",
+      "license": "BSD 3-Clause",
+      "licenseStatus": "verified",
+      "redistributable": true,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "verifiedAt": "2026-10-18",
+      "evidence": "仓库 LICENSE 为 BSD 3-Clause License, Copyright (c) 2022-2026, KyleBing，文本见 licenses/kylebing-BSD-3-Clause.txt。",
+      "files": [
+        "../bilibili-vocab-extension/sources/kylebing-cet4.json",
+        "../bilibili-vocab-extension/sources/kylebing-cet6.json",
+        "../bilibili-vocab-extension/sources/kylebing-kaoyan.json"
+      ],
+      "notes": "提供 CET4/CET6/考研释义、词组与考试词频排序（考试词库 core 高频层）。许可本身允许带署名再分发；构建清单仍按阻断处理，见 buildPolicy。"
+    },
+    {
+      "name": "exam-data/NETEMVocabulary",
+      "category": "exam-ranking",
+      "url": "https://github.com/exam-data/NETEMVocabulary",
+      "license": "NOASSERTION",
+      "licenseStatus": "needs-review",
+      "redistributable": false,
+      "attributionRequired": true,
+      "shareAlikeRequired": false,
+      "verifiedAt": "2026-10-18",
+      "evidence": "GitHub API 返回 NOASSERTION，仓库无明确许可证文本。",
+      "files": ["../bilibili-vocab-extension/sources/netem_full_list.json"],
+      "notes": "仅提供考研词频排序，本地开发构建使用，发布包移除其派生字段。"
+    }
+  ],
+  "buildPolicy": {
+    "manifest": "bilibili-vocab-extension/scripts/build-vocab-dataset.js 的 SOURCE_MANIFEST 与生成出的 bilibili-vocab-extension/data/sources.json",
+    "publishBlockingSources": ["kylebing", "netem"],
+    "pendingDecisions": [
+      {
+        "source": "KyleBing/english-vocabulary",
+        "issue": "上游许可证已为 BSD-3-Clause，但构建清单仍标记为无许可证元数据的 needs-review 来源。",
+        "impact": "若解除阻断，发布包将包含其释义与考试词频字段，coverageTier 的 core 高频层在 publish-safe 构建下会由空变为有值。",
+        "action": "由项目维护者决定是否更新 SOURCE_MANIFEST 与 docs/词库来源与许可证.md；本次未改动发布策略。"
+      },
+      {
+        "source": "exam-data/NETEMVocabulary",
+        "issue": "许可证无法断言（NOASSERTION）。",
+        "action": "维持阻断；如需发布其排序字段，需上游明确许可或替换数据源。"
+      }
+    ]
+  }
+}

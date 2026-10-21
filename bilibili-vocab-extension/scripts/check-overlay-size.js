@@ -2,6 +2,8 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 
+const { parseBudget, toKb, toRoundedKb } = require('./lib/size-budget-utils.js');
+
 const DEFAULT_OVERLAY_FILE = path.resolve(__dirname, '..', 'dist', 'overlay.js');
 const DEFAULT_OVERLAY_REPORT_FILE = path.resolve(
   __dirname,
@@ -18,21 +20,6 @@ const DEFAULT_OVERLAY_BASELINE_FILE = path.resolve(
 const DEFAULT_RAW_BUDGET_KB = 280;
 const DEFAULT_GZIP_BUDGET_KB = 70;
 const DEFAULT_PROJECT_ROOT = path.resolve(__dirname, '..');
-
-function toKb(bytes) {
-  return Number((bytes / 1024).toFixed(2));
-}
-
-function toRoundedKb(value) {
-  return Number(Number(value).toFixed(2));
-}
-
-function parseBudget(rawValue, fallback) {
-  if (rawValue == null || rawValue === '') {
-    return fallback;
-  }
-  return Number(rawValue);
-}
 
 function assertPositiveBudget(rawBudgetKb, gzipBudgetKb) {
   if (!Number.isFinite(rawBudgetKb) || rawBudgetKb <= 0) {

@@ -150,10 +150,6 @@
   let wordStatsLoadPromise = null;
   let wordStatsMutationChain = Promise.resolve();
 
-  function getTodayDateString() {
-    return new Date().toISOString().slice(0, 10);
-  }
-
   function normalizeLearningStreak(raw) {
     const data = raw && typeof raw === 'object' ? raw : {};
     return {
@@ -216,6 +212,28 @@
     const run = wordStatsMutationChain.catch(() => {}).then(task);
     wordStatsMutationChain = run.catch(() => {});
     return run;
+  }
+
+  function hasRuntimeMessagingApi() {
+    return Boolean(
+      globalScope.RuntimeMessaging &&
+      typeof globalScope.RuntimeMessaging.sendRuntimeMessage === 'function' &&
+      globalScope.RuntimeMessaging.MESSAGE_TYPES
+    );
+  }
+
+  function sendLearningMutation(type, payload) {
+    if (!hasRuntimeMessagingApi()) {
+      return Promise.reject(new Error('RuntimeMessaging unavailable'));
+    }
+    return globalScope.RuntimeMessaging.sendRuntimeMessage(type, payload);
+  }
+
+  function invalidateWordStatsCache() {
+    // The background queue or another tab may have written the shared keys;
+    // drop the page cache so the next read merges on top of their state.
+    wordStatsReady = false;
+    wordStatsLoadPromise = null;
   }
 
   function queueLearningStreakMutation(task) {
@@ -482,7 +500,7 @@
         });
 
     const firstSeenAt = base.firstSeenAt || normalizeTimestamp(now);
-    const nowTimestamp = normalizeTimestamp(now);
+    const nowTimestamp = normalizeTimestamp(now) || Date.now();
     const next = {
       ...base,
       translation: String((payload && payload.translation) || base.translation || '').trim(),
@@ -539,7 +557,7 @@
     const decision = String(action || '')
       .trim()
       .toLowerCase();
-    const nowTimestamp = normalizeTimestamp(now);
+    const nowTimestamp = normalizeTimestamp(now) || Date.now();
     const baseInterval = normalizeIntervalDays(
       normalized.intervalDays,
       getIntervalByBucket(normalized.nextReviewBucket)
@@ -990,6 +1008,105 @@
     return wordStatsLoadPromise;
   }
 
+  function reloadWordStats() {
+    // Force a fresh read so mutations never build on a stale cross-context snapshot
+    // (background recordLearningHit/applyReviewFeedback write the same keys).
+    wordStatsReady = false;
+    wordStatsLoadPromise = null;
+    return ensureWordStatsLoaded();
+  }
+
+  function watchLearningStorageChanges() {
+    if (
+      typeof chrome === 'undefined' ||
+      !chrome.storage ||
+      !chrome.storage.onChanged ||
+      typeof chrome.storage.onChanged.addListener !== 'function'
+    ) {
+      return;
+    }
+
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      if (areaName !== 'local') {
+        return;
+      }
+
+      const learningKeys = [
+        STORAGE_KEYS.WORD_STATS_V2,
+        STORAGE_KEYS.REVIEW_QUEUE,
+        STORAGE_KEYS.LEARNING_SUMMARY,
+        STORAGE_KEYS.LEARNING_STREAK,
+      ];
+      if (!learningKeys.some((key) => Boolean(changes && changes[key]))) {
+        return;
+      }
+
+      // Drop cached state so the next read picks up writes made by the
+      // background queue or another tab instead of overwriting them later.
+      wordStatsReady = false;
+      wordStatsLoadPromise = null;
+      if (changes[STORAGE_KEYS.LEARNING_STREAK]) {
+        learningStreak = null;
+        learningStreakLoadPromise = null;
+      }
+    });
+  }
+
+  watchLearningStorageChanges();
+
+  // Pure record builders shared by the page fallback and the background
+  // single-writer so both contexts merge identical record shapes.
+  function buildSavedWordRecord(word, existing, details = {}, now = Date.now()) {
+    const wordKey = normalizeWord(word);
+    const baseRecord = existing || normalizeLearningRecord({ word: wordKey });
+    const mergedDetails = {
+      ...normalizeVocabularyDetails(baseRecord.details),
+      ...normalizeVocabularyDetails(details),
+    };
+    const mergedContext =
+      normalizeVocabularyContext(details) || normalizeVocabularyContext(baseRecord);
+    const mergedSource = mergeVocabularySource(details, baseRecord);
+
+    return {
+      ...normalizeLearningRecord(baseRecord, {
+        word: wordKey,
+        translation: mergedDetails.meaning,
+        level: mergedDetails.level,
+      }),
+      word: wordKey,
+      status: 'saved',
+      saveCount: normalizeCount((baseRecord.saveCount || 0) + 1),
+      lastReviewedAt: normalizeTimestamp(now),
+      savedAt: normalizeTimestamp(now),
+      details: mergedDetails,
+      context: mergedContext,
+      source: mergedSource,
+      exposures: normalizeCount(
+        baseRecord.exposures != null ? baseRecord.exposures : baseRecord.exposureCount
+      ),
+    };
+  }
+
+  function buildRemovedWordRecord(word, existing, now = Date.now()) {
+    const wordKey = normalizeWord(word);
+    if (!existing || existing.status !== 'saved') {
+      return null;
+    }
+
+    const nextRecord = {
+      ...normalizeLearningRecord(existing),
+      word: wordKey,
+      status: 'seen',
+      saveCount: normalizeCount(Math.max(0, (existing.saveCount || 1) - 1)),
+      details: normalizeVocabularyDetails(existing.details),
+      exposures: normalizeCount(
+        existing.exposures != null ? existing.exposures : existing.exposureCount
+      ),
+    };
+    delete nextRecord.savedAt;
+    return nextRecord;
+  }
+
   function buildPersistableWordStats(sourceWordStats = wordStats) {
     const payload = {};
     Object.keys(sourceWordStats || {}).forEach((key) => {
@@ -1038,41 +1155,35 @@
         return false;
       }
 
+      const now = Date.now();
+
+      // Single-writer path: the background queue merges this save onto the
+      // latest stored snapshot so concurrent hits/reviews from other contexts
+      // are never rolled back by a page-side full-map write.
+      if (hasRuntimeMessagingApi()) {
+        try {
+          const result = await sendLearningMutation(
+            globalScope.RuntimeMessaging.MESSAGE_TYPES.LEARNING_SAVE_WORD,
+            { word: wordKey, details, now }
+          );
+          invalidateWordStatsCache();
+          void updateLearningStreak(now);
+          return Boolean(result && result.saved);
+        } catch (error) {
+          logError('Vocabulary book background save failed', error);
+          // Fall through to the local read-modify-write fallback.
+        }
+      }
+
       try {
-        await ensureWordStatsLoaded();
+        await reloadWordStats();
       } catch (error) {
         logError('Vocabulary book state read failed', error);
         return false;
       }
 
-      const now = Date.now();
-      const existing = wordStats[wordKey] || normalizeLearningRecord({ word: wordKey });
-      const mergedDetails = {
-        ...normalizeVocabularyDetails(existing.details),
-        ...normalizeVocabularyDetails(details),
-      };
-      const mergedContext =
-        normalizeVocabularyContext(details) || normalizeVocabularyContext(existing);
-      const mergedSource = mergeVocabularySource(details, existing);
-
-      const nextRecord = {
-        ...normalizeLearningRecord(existing, {
-          word: wordKey,
-          translation: mergedDetails.meaning,
-          level: mergedDetails.level,
-        }),
-        word: wordKey,
-        status: 'saved',
-        saveCount: normalizeCount((existing.saveCount || 0) + 1),
-        lastReviewedAt: normalizeTimestamp(now),
-        savedAt: normalizeTimestamp(now),
-        details: mergedDetails,
-        context: mergedContext,
-        source: mergedSource,
-        exposures: normalizeCount(
-          existing.exposures != null ? existing.exposures : existing.exposureCount
-        ),
-      };
+      const existing = wordStats[wordKey];
+      const nextRecord = buildSavedWordRecord(wordKey, existing, details, now);
       const nextWordStats = {
         ...wordStats,
         [wordKey]: nextRecord,
@@ -1099,8 +1210,22 @@
         return false;
       }
 
+      if (hasRuntimeMessagingApi()) {
+        try {
+          const result = await sendLearningMutation(
+            globalScope.RuntimeMessaging.MESSAGE_TYPES.LEARNING_REMOVE_WORD,
+            { word: wordKey, now: Date.now() }
+          );
+          invalidateWordStatsCache();
+          return Boolean(result && result.removed);
+        } catch (error) {
+          logError('Vocabulary book background remove failed', error);
+          // Fall through to the local read-modify-write fallback.
+        }
+      }
+
       try {
-        await ensureWordStatsLoaded();
+        await reloadWordStats();
       } catch (error) {
         logError('Vocabulary book state read failed', error);
         return false;
@@ -1111,17 +1236,7 @@
         return false;
       }
 
-      const nextRecord = {
-        ...normalizeLearningRecord(existing),
-        word: wordKey,
-        status: 'seen',
-        saveCount: normalizeCount(Math.max(0, (existing.saveCount || 1) - 1)),
-        details: normalizeVocabularyDetails(existing.details),
-        exposures: normalizeCount(
-          existing.exposures != null ? existing.exposures : existing.exposureCount
-        ),
-      };
-      delete nextRecord.savedAt;
+      const nextRecord = buildRemovedWordRecord(wordKey, existing, Date.now());
       const nextWordStats = {
         ...wordStats,
         [wordKey]: nextRecord,
@@ -1163,39 +1278,6 @@
     return allSaved;
   }
 
-  function exportVocabularyBook(format = 'json') {
-    const words = getVocabularyBookWords();
-    if (format === 'csv') {
-      const headers = [
-        '单词',
-        '释义',
-        '难度等级',
-        '原句上下文',
-        '来源标题',
-        '来源链接',
-        '来源时间点',
-        '收藏时间',
-        '遇见次数',
-      ];
-      const rows = words.map((w) => [
-        w.word,
-        w.details && w.details.meaning ? w.details.meaning : w.translation || '',
-        w.details && w.details.level ? w.details.level : w.level || '',
-        w.context || '',
-        w.source && w.source.title ? w.source.title : '',
-        w.source && w.source.url ? w.source.url : '',
-        w.source && w.source.timeLabel ? w.source.timeLabel : '',
-        w.savedAt ? new Date(w.savedAt).toLocaleString() : '',
-        normalizeCount(w.exposures != null ? w.exposures : w.exposureCount),
-      ]);
-      return [
-        headers.join(','),
-        ...rows.map((r) => r.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
-      ].join('\n');
-    }
-    return JSON.stringify(words, null, 2);
-  }
-
   const api = {
     STORAGE_KEYS,
     STATUSES,
@@ -1210,12 +1292,13 @@
     applyReviewFeedback,
     syncReviewQueue,
     buildLearningSummary,
+    buildSavedWordRecord,
+    buildRemovedWordRecord,
     getStatusLabel,
     getReviewBucketLabel,
     saveWordToVocabularyBook,
     removeWordFromVocabularyBook,
     getVocabularyBookWords,
-    exportVocabularyBook,
     loadLearningStreak,
     updateLearningStreak,
     getLearningStreak,

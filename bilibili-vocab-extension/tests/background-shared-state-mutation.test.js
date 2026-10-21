@@ -48,6 +48,7 @@ function createChromeStub(storageState) {
     message: null,
   };
   const runtime = {
+    id: 'bili-vocab-extension-id',
     lastError: null,
     onInstalled: {
       addListener(listener) {
@@ -78,7 +79,7 @@ function createChromeStub(storageState) {
       }
 
       try {
-        listeners.message(message, { id: 'test-sender' }, (response) => {
+        listeners.message(message, { id: 'bili-vocab-extension-id' }, (response) => {
           if (typeof callback === 'function') {
             callback(response);
           }

@@ -2,28 +2,29 @@
   // Legacy runtime keys retained for backward compatibility across extension components.
   const CONTENT_SCRIPT_INSTANCE_KEY = '__BILI_VOCAB_CONTENT_SCRIPT_INSTANCE__';
 
-  const config = globalThis.Config ||
-    (typeof require === 'function' ? require('../config.js') : null);
+  const config =
+    globalThis.Config || (typeof require === 'function' ? require('../config.js') : null);
 
-  const DEFAULT_SETTINGS = config && config.DEFAULT_SETTINGS
-    ? { ...config.DEFAULT_SETTINGS }
-    : {
-        enabled: true,
-        schemaVersion: 2,
-        reviewDanmakuEnabled: false,
-        reviewDanmakuSpeed: 'normal',
-        reviewDanmakuDensity: 'normal',
-        webPageEnabled: true,
-        domainRules: {},
-        activeLevels: ['CET4', 'CET6', 'KAOYAN', 'IELTS', 'TOEFL'],
-        replaceRatio: 0.2,
-        maxReplaceCount: 2,
-        targetCefr: 'B2',
-        vocabularyMode: 'core',
-        examPreference: 'balanced',
-        bilingualMode: 'default',
-        themeMode: 'auto',
-      };
+  const DEFAULT_SETTINGS =
+    config && config.DEFAULT_SETTINGS
+      ? { ...config.DEFAULT_SETTINGS }
+      : {
+          enabled: true,
+          schemaVersion: 2,
+          reviewDanmakuEnabled: false,
+          reviewDanmakuSpeed: 'normal',
+          reviewDanmakuDensity: 'normal',
+          webPageEnabled: false,
+          domainRules: {},
+          activeLevels: ['CET4', 'CET6', 'KAOYAN', 'IELTS', 'TOEFL'],
+          replaceRatio: 0.2,
+          maxReplaceCount: 2,
+          targetCefr: 'B2',
+          vocabularyMode: 'core',
+          examPreference: 'balanced',
+          bilingualMode: 'default',
+          themeMode: 'auto',
+        };
 
   const PROCESS_DELAY_MS = 120;
   const MUTATION_OBSERVER_THROTTLE_MS = 500;
@@ -49,8 +50,7 @@
   const RENDER_SIGNATURE_DATA_KEY = 'biliVocabRenderSignature';
 
   // Legacy message namespaces retained for backward compatibility across extension components.
-  const ACTIVE_TAB_SUBTITLE_NAVIGATION_READ =
-    'BILI_VOCAB_ACTIVE_TAB_SUBTITLE_NAVIGATION_READ';
+  const ACTIVE_TAB_SUBTITLE_NAVIGATION_READ = 'BILI_VOCAB_ACTIVE_TAB_SUBTITLE_NAVIGATION_READ';
   const ACTIVE_TAB_SUBTITLE_NAVIGATION_NAVIGATE =
     'BILI_VOCAB_ACTIVE_TAB_SUBTITLE_NAVIGATION_NAVIGATE';
   const ACTIVE_TAB_SUBTITLE_NAVIGATION_SUBSCRIBE =
@@ -114,9 +114,7 @@
 
   function isVideoSiteHost(hostname) {
     const normalized = String(hostname || '').toLowerCase();
-    return VIDEO_SITE_HOSTS.some(
-      (site) => normalized === site || normalized.endsWith(`.${site}`)
-    );
+    return VIDEO_SITE_HOSTS.some((site) => normalized === site || normalized.endsWith(`.${site}`));
   }
 
   function shouldLoadOverlayModuleForHost(hostname) {
@@ -129,9 +127,7 @@
 
   function shouldEnableTimelinePolling() {
     const doc = globalThis.document;
-    return Boolean(
-      doc && typeof doc.querySelector === 'function' && doc.querySelector('video')
-    );
+    return Boolean(doc && typeof doc.querySelector === 'function' && doc.querySelector('video'));
   }
 
   function shouldLogDebug() {

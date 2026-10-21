@@ -1,5 +1,7 @@
 const { spawnSync } = require('node:child_process');
 
+const { createSpawnSpec, getPnpmCommand } = require('./lib/spawn-utils.js');
+
 const RELEASE_CHECK_SCRIPT_NAMES = [
   'lint',
   'typecheck',
@@ -10,32 +12,6 @@ const RELEASE_CHECK_SCRIPT_NAMES = [
   'test:zip-smoke:built',
 ];
 const REMOTE_REAL_SITE_SCRIPT_NAME = 'test:remote:real-site';
-
-function getPnpmCommand(platform = process.platform) {
-  return platform === 'win32' ? 'pnpm.cmd' : 'pnpm';
-}
-
-function quoteCommandPart(value) {
-  const text = String(value);
-  return /\s/.test(text) ? `"${text.replace(/"/g, '\\"')}"` : text;
-}
-
-function formatCommand(command, args = []) {
-  return [command, ...args].map(quoteCommandPart).join(' ');
-}
-
-function shouldSpawnWithShell(command, platform = process.platform) {
-  return platform === 'win32' && /\.(cmd|bat)$/i.test(String(command || ''));
-}
-
-function createSpawnSpec(command, args = [], options = {}) {
-  const useShell = shouldSpawnWithShell(command, options.platform);
-  return {
-    command: useShell ? formatCommand(command, args) : command,
-    args: useShell ? [] : args,
-    shell: useShell,
-  };
-}
 
 function shouldIncludeRemoteRealSite(options = {}) {
   if (typeof options.includeRemoteRealSite === 'boolean') {

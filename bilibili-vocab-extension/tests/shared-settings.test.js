@@ -61,7 +61,7 @@ test('shared settings: should normalize invalid values into safe defaults', () =
       reviewDanmakuDensity: 'normal',
       vocabularyMode: 'core',
       examPreference: 'balanced',
-      webPageEnabled: true,
+      webPageEnabled: false,
       activeLevels: ['CET4', 'IELTS'],
       replaceRatio: 0.3,
       maxReplaceCount: 1,
@@ -88,26 +88,15 @@ test('shared settings: should clamp zero values to lower bounds instead of defau
 
   assert.equal(normalized.replaceRatio, 0.1);
   assert.equal(normalized.maxReplaceCount, 1);
-  assert.equal(sharedSettings.getHeroMetricMeta('ratio', 0), '轻量低扰');
-  assert.equal(sharedSettings.getHeroMetricMeta('maxReplace', 0), '轻量点状');
 });
 
-test('shared settings: should expose popup metric labels through shared helper', () => {
+test('shared settings: should expose bilingual mode label through shared helper', () => {
   assert.equal(
     loadError,
     null,
     loadError ? loadError.message : 'sharedSettings.js should be loadable'
   );
 
-  assert.equal(sharedSettings.getHeroMetricMeta('ratio', 0.1), '轻量低扰');
-  assert.equal(sharedSettings.getHeroMetricMeta('ratio', 0.2), '均衡曝光');
-  assert.equal(sharedSettings.getHeroMetricMeta('ratio', 0.3), '强化输入');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewSpeed', 'slow'), '低压慢复习');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewSpeed', 'normal'), '稳定推进');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewSpeed', 'fast'), '冲刺高频');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewDensity', 'sparse'), '低频回放');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewDensity', 'normal'), '稳定回放');
-  assert.equal(sharedSettings.getHeroMetricMeta('reviewDensity', 'dense'), '高频回放');
   assert.equal(sharedSettings.getBilingualModeLabel('bilingual'), '双语对照');
 });
 
@@ -165,10 +154,6 @@ test('shared settings: should derive preview copy and preset key from normalized
 
   assert.equal(sharedSettings.getPresetKeyFromSettings(intensive), 'intensive');
   assert.equal(sharedSettings.getLearningProfile(intensive).tone, 'intensive');
-  assert.equal(
-    sharedSettings.getHeroMetricMeta('reviewSpeed', intensive.reviewDanmakuSpeed),
-    '冲刺高频'
-  );
   assert.match(sharedSettings.buildSettingsPreview(intensive), /30%/);
   assert.match(sharedSettings.buildSettingsPreview(intensive), /C1/);
   assert.match(sharedSettings.buildSettingsPreview(intensive), /高密度/);

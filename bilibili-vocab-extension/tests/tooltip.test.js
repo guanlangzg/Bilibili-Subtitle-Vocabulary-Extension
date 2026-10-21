@@ -118,3 +118,65 @@ test('reportContextMisreplaceFeedback: should refresh rendered translations afte
   delete globalThis.SubtitleTranslator;
   delete globalThis.BiliVocabContentRuntime;
 });
+
+test('destroy: should remove listeners so feedback stops after teardown', () => {
+  const previousDocument = global.document;
+  const previousWindow = global.window;
+  const registrations = [];
+
+  const createTarget = (label) => ({
+    addEventListener(type, listener) {
+      registrations.push({ label, type, listener, removed: false });
+    },
+    removeEventListener(type, listener) {
+      const entry = registrations.find(
+        (item) => item.label === label && item.type === type && item.listener === listener
+      );
+      if (entry) {
+        entry.removed = true;
+      }
+    },
+  });
+
+  const tooltipElement = {
+    id: 'bsv-tooltip',
+    classList: { remove() {}, add() {} },
+    setAttribute() {},
+    contains() {
+      return false;
+    },
+    parentNode: {
+      removeChild() {},
+    },
+  };
+
+  global.document = {
+    ...createTarget('document'),
+    getElementById() {
+      return tooltipElement;
+    },
+    createElement() {
+      return tooltipElement;
+    },
+    body: { appendChild() {} },
+  };
+  global.window = createTarget('window');
+
+  try {
+    const isolatedTooltip = require('../tooltip.js');
+    isolatedTooltip.init();
+    assert.equal(registrations.filter((item) => item.label === 'document').length, 6);
+
+    isolatedTooltip.destroy();
+
+    const removed = registrations.filter((item) => item.removed);
+    assert.equal(removed.length, 7);
+    const reinitialized = registrations.length;
+    isolatedTooltip.init();
+    assert.equal(registrations.length, reinitialized + 7);
+    isolatedTooltip.destroy();
+  } finally {
+    global.document = previousDocument;
+    global.window = previousWindow;
+  }
+});

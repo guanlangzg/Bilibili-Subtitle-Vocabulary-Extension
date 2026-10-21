@@ -59,6 +59,8 @@
     const logError = requireFunction('logError', config.logError);
 
     let storageChangesWatching = false;
+    let storageChangeListener = null;
+    let storageChangeTarget = null;
 
     function normalizeSettings(rawSettings) {
       if (sharedSettings && typeof sharedSettings.normalizeSettings === 'function') {
@@ -114,7 +116,8 @@
       }
 
       storageChangesWatching = true;
-      targetStorage.onChanged.addListener((changes, areaName) => {
+      storageChangeTarget = targetStorage;
+      storageChangeListener = (changes, areaName) => {
         if (areaName !== 'local') {
           return;
         }
@@ -185,7 +188,22 @@
         } catch (error) {
           logError('Runtime settings synchronization failed', error);
         }
-      });
+      };
+      targetStorage.onChanged.addListener(storageChangeListener);
+    }
+
+    function stop() {
+      if (
+        storageChangeListener &&
+        storageChangeTarget &&
+        storageChangeTarget.onChanged &&
+        typeof storageChangeTarget.onChanged.removeListener === 'function'
+      ) {
+        storageChangeTarget.onChanged.removeListener(storageChangeListener);
+      }
+      storageChangeListener = null;
+      storageChangeTarget = null;
+      storageChangesWatching = false;
     }
 
     return {
@@ -194,6 +212,7 @@
       classifyRuntimeSettingsChange,
       hasRuntimeSettingsChange,
       watchStorageChanges,
+      stop,
     };
   }
 

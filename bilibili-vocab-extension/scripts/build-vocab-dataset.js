@@ -5,10 +5,20 @@ const path = require('node:path');
 const https = require('node:https');
 const zlib = require('node:zlib');
 const readline = require('node:readline');
+const {
+  classifyTerm,
+  getPrimaryPos,
+  isReplaceableTerm,
+  normalizeGlossText,
+} = require('./lib/zh-lexicon.js');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
+const REPO_ROOT_DIR = path.resolve(ROOT_DIR, '..');
 const SOURCES_DIR = path.join(ROOT_DIR, 'sources');
 const DATA_DIR = path.join(ROOT_DIR, 'data');
+// Syllabus word lists are collected outside the extension project so the raw
+// collection can be reviewed and licensed independently of the build inputs.
+const SYLLABUS_DIR = path.join(REPO_ROOT_DIR, 'cet6-vocabulary', 'syllabus-2016');
 
 const SOURCE_FILES = {
   ecdict: {
@@ -43,8 +53,16 @@ const SOURCE_FILES = {
     file: path.join(SOURCES_DIR, 'netem_full_list.json'),
     url: 'https://raw.githubusercontent.com/exam-data/NETEMVocabulary/master/netem_full_list.json',
   },
+  endictCet4: {
+    file: path.join(SYLLABUS_DIR, 'cet4.json'),
+    url: 'https://raw.githubusercontent.com/ismartcoding/endict/main/vocabulary/cet4.json',
+  },
+  endictCet6: {
+    file: path.join(SYLLABUS_DIR, 'cet6.json'),
+    url: 'https://raw.githubusercontent.com/ismartcoding/endict/main/vocabulary/cet6.json',
+  },
 };
-const SOURCE_MANIFEST_DATE = '2026-04-16';
+const SOURCE_MANIFEST_DATE = '2026-10-18';
 const SOURCE_MANIFEST = [
   {
     name: 'ECDICT',
@@ -99,6 +117,20 @@ const SOURCE_MANIFEST = [
       'Verify upstream redistribution terms or remove NETEM-derived ranking fields before publishing.',
     sourceIds: ['netem'],
     notes: '提供考研词频排序，用于构建 KAOYAN 的 examFrequencyScore 与 examPriorityScore。',
+  },
+  {
+    name: 'CET 考试大纲词表 via ismartcoding/endict',
+    url: 'https://github.com/ismartcoding/endict',
+    license: 'MIT',
+    licenseStatus: 'verified',
+    redistributable: true,
+    attributionRequired: true,
+    shareAlikeRequired: false,
+    publishBlocking: false,
+    reviewAction: '',
+    sourceIds: ['endictCet4', 'endictCet6'],
+    notes:
+      '《全国大学英语四、六级考试大纲（2016年修订版）》词表（四级 / 六级分列），用于考纲词目判定与考纲缺失词补齐。',
   },
   {
     name: 'CC-CEDICT',
@@ -165,6 +197,9 @@ const POS_OUTPUT_ORDER = [
   'pl',
 ];
 const MANIFEST_FILE_NAME = 'sources.json';
+// Human-readable attribution shipped inside the published package so the
+// CC BY-SA / MIT attribution requirements travel with the data itself.
+const ATTRIBUTION_FILE_NAME = 'ATTRIBUTION.md';
 
 const LEVELS = ['CET4', 'CET6', 'KAOYAN', 'IELTS', 'TOEFL'];
 const EXAM_LEVELS = new Set(['CET4', 'CET6', 'KAOYAN']);
@@ -593,7 +628,10 @@ function getEntryPartOfSpeech(rawPosField, rawDefinition) {
 }
 
 function toSourceRelativePath(filePath) {
-  return path.posix.join('sources', path.basename(filePath));
+  // Sources may live in nested folders or outside the extension project (the CET
+  // syllabus collection sits in cet6-vocabulary/ at the repo root), so record the
+  // path relative to the extension project instead of flattening to the file name.
+  return path.relative(ROOT_DIR, filePath).split(path.sep).join('/');
 }
 
 function createSourceManifest(sourceFiles = SOURCE_FILES) {
@@ -615,16 +653,12 @@ function createSourceManifest(sourceFiles = SOURCE_FILES) {
   };
 }
 
-function hasCuratedExamSignal(sourceFlags) {
-  return uniq(sourceFlags).some((flag) => flag === 'kylebing' || flag === 'netem');
-}
-
 function deriveCoverageTier(level, sourceFlags) {
   if (!EXAM_LEVELS.has(level)) {
     return 'full';
   }
 
-  return hasCuratedExamSignal(sourceFlags) ? 'core' : 'full';
+  return hasPublishBlockingFlag(sourceFlags) ? 'core' : 'full';
 }
 
 function deriveExamPriorityScore(sourceFlags, phraseCount) {
@@ -891,6 +925,35 @@ function buildNetemMap(sourceFiles = SOURCE_FILES) {
   return mapped;
 }
 
+// The syllabus files are the authoritative level membership for CET4/CET6: a word
+// listed there belongs to that exam level even when ECDICT carries no matching tag.
+function collectSyllabusLevels(level, filePath, syllabusMap) {
+  const records = readJson(filePath);
+  if (!Array.isArray(records)) {
+    return syllabusMap;
+  }
+
+  records.forEach((item) => {
+    const word = normalizeWord(item);
+    if (!word) {
+      return;
+    }
+
+    const levels = syllabusMap.get(word) || new Set();
+    levels.add(level);
+    syllabusMap.set(word, levels);
+  });
+
+  return syllabusMap;
+}
+
+function buildSyllabusMap(sourceFiles = SOURCE_FILES) {
+  const syllabusMap = new Map();
+  collectSyllabusLevels('CET4', sourceFiles.endictCet4.file, syllabusMap);
+  collectSyllabusLevels('CET6', sourceFiles.endictCet6.file, syllabusMap);
+  return syllabusMap;
+}
+
 function shouldReplaceEntry(existing, candidate) {
   if (!existing) {
     return true;
@@ -903,7 +966,7 @@ function shouldReplaceEntry(existing, candidate) {
   return String(candidate.meaning || '').length > String(existing.meaning || '').length;
 }
 
-async function buildExamEntries(cefrMap, sourceFiles = SOURCE_FILES) {
+async function buildExamEntries(cefrMap, syllabusMap = new Map(), sourceFiles = SOURCE_FILES) {
   const entriesByKey = new Map();
   let isFirstLine = true;
 
@@ -919,7 +982,9 @@ async function buildExamEntries(cefrMap, sourceFiles = SOURCE_FILES) {
 
     const columns = parseCsvLine(line);
     const word = normalizeWord(columns[0]);
-    const levels = extractLevelsByTag(columns[7]);
+    const taggedLevels = extractLevelsByTag(columns[7]);
+    const syllabusLevels = syllabusMap.get(word);
+    const levels = uniq([...taggedLevels, ...(syllabusLevels ? [...syllabusLevels] : [])]);
     if (!word || levels.length === 0) {
       return;
     }
@@ -936,6 +1001,11 @@ async function buildExamEntries(cefrMap, sourceFiles = SOURCE_FILES) {
     };
 
     levels.forEach((level) => {
+      const sourceFlags = ['ecdict'];
+      if (syllabusLevels && syllabusLevels.has(level)) {
+        sourceFlags.push('syllabus');
+      }
+
       const candidate = {
         word,
         meaning,
@@ -948,10 +1018,10 @@ async function buildExamEntries(cefrMap, sourceFiles = SOURCE_FILES) {
         frequency: Math.max(Number(columns[9] || 0), cefrInfo.frequency || 0),
         aliases: [],
         altMeanings: [],
-        coverageTier: deriveCoverageTier(level, ['ecdict']),
-        sourceFlags: ['ecdict'],
+        coverageTier: deriveCoverageTier(level, sourceFlags),
+        sourceFlags,
         examFrequencyScore: 0,
-        examPriorityScore: deriveExamPriorityScore(['ecdict'], 0),
+        examPriorityScore: deriveExamPriorityScore(sourceFlags, 0),
         isPhraseBacked: false,
         phraseCount: 0,
       };
@@ -967,10 +1037,22 @@ async function buildExamEntries(cefrMap, sourceFiles = SOURCE_FILES) {
   return entriesByKey;
 }
 
-async function buildCedictSupplement(selectedWords, sourceFiles = SOURCE_FILES) {
-  const supplementMap = new Map();
+// Produces word → Chinese terms where the term is the English word's actual
+// translation AND the term can be substituted in place. A term qualifies only
+// when its own first gloss is exactly the headword and it is a noun phrase:
+// replacing a verb or adverb Chinese term yields sentence fragments
+// (放弃 → abandonment, 更多 → more). Incidental mentions such as
+// 伯母 → address ("polite form of address") are rejected by the first-gloss rule.
+async function buildCedictTermPairs(selectedWords, entriesByWord, sourceFiles = SOURCE_FILES) {
+  const pairMap = new Map();
+  // Chinese term → noun/verb/'' classification, reused to vet fallback terms.
+  const termPos = new Map();
+  // English word → every Chinese term that appears anywhere in its CEDICT glosses.
+  // Used to verify fallback aliases taken from ECDICT's meaning text.
+  const reverseGlossIndex = new Map();
 
-  await readGzipLines(sourceFiles.cedict.file, (line) => {
+  await readGzipLines(sourceFiles.cedict.file, (rawLine) => {
+    const line = String(rawLine || '').trim();
     if (!line || line.startsWith('#')) {
       return;
     }
@@ -981,67 +1063,119 @@ async function buildCedictSupplement(selectedWords, sourceFiles = SOURCE_FILES) 
     }
 
     const simplified = String(match[2] || '').trim();
-    if (!hasChinese(simplified)) {
+    if (!isReplaceableTerm(simplified)) {
       return;
     }
 
-    const definitions = String(match[3] || '');
-    const tokens = definitions.toLowerCase().match(/[a-z][a-z'-]{2,}/g) || [];
-    for (let index = 0; index < tokens.length; index += 1) {
-      const token = normalizeWord(tokens[index]);
-      if (!token || !selectedWords.has(token)) {
-        continue;
-      }
-
-      if (!supplementMap.has(token)) {
-        supplementMap.set(token, new Set());
-      }
-
-      const bucket = supplementMap.get(token);
-      if (bucket.size >= 8) {
-        continue;
-      }
-      bucket.add(simplified);
-    }
-  });
-
-  return supplementMap;
-}
-
-function mergeCedictAliases(entriesByKey, cedictSupplement) {
-  entriesByKey.forEach((entry, key) => {
-    const aliases = cedictSupplement.get(entry.word);
-    if (!aliases || aliases.size === 0) {
+    const glosses = String(match[3] || '')
+      .split('/')
+      .filter(Boolean);
+    if (glosses.length === 0) {
       return;
     }
 
-    const mergedAliases = [];
-
-    Array.from(aliases).forEach((alias) => {
-      const token = String(alias || '').trim();
-      if (!token) {
-        return;
-      }
-      if (token.length < 2 || token.length > 6) {
-        return;
-      }
-      if (/[，。,.;；、:：()（）]/.test(token)) {
-        return;
-      }
-      if (!hasChinese(token)) {
-        return;
-      }
-      if (mergedAliases.includes(token)) {
-        return;
-      }
-      mergedAliases.push(token);
+    glosses.forEach((gloss) => {
+      const tokens =
+        String(gloss)
+          .toLowerCase()
+          .match(/[a-z][a-z'-]{2,}/g) || [];
+      tokens.forEach((token) => {
+        if (!selectedWords.has(token)) {
+          return;
+        }
+        if (!reverseGlossIndex.has(token)) {
+          reverseGlossIndex.set(token, new Set());
+        }
+        reverseGlossIndex.get(token).add(simplified);
+      });
     });
 
-    entry.aliases = mergedAliases.slice(0, 5);
-    if (entry.aliases.length > 0 && !entry.sourceFlags.includes('cedict')) {
-      entry.sourceFlags.push('cedict');
+    const headword = normalizeGlossText(glosses[0]);
+    if (!headword || !selectedWords.has(headword)) {
+      return;
     }
-    entriesByKey.set(key, entry);
+
+    // The English side must be a noun. Bare glosses classify as nouns, so
+    // 精彩 → wonderful would otherwise pass and produce "非常wonderful".
+    const entry = entriesByWord.get(headword);
+    const headwordPos = entry ? getPrimaryPos(entry.partOfSpeech) : '';
+    if (headwordPos !== 'noun') {
+      return;
+    }
+
+    // Noun-only: a swapped noun still leaves a readable sentence, whereas verb
+    // and adverb swaps need agreement Chinese does not have. The headword's part
+    // of speech settles the -ly case (家族 → family, 月报 → monthly).
+    const pos = classifyTerm(glosses, headwordPos);
+    if (pos) {
+      termPos.set(simplified, pos);
+    }
+    if (pos !== 'noun') {
+      return;
+    }
+
+    if (!pairMap.has(headword)) {
+      pairMap.set(headword, new Set());
+    }
+    const bucket = pairMap.get(headword);
+    // Terms arrive in CEDICT file order, which is roughly by frequency, so the
+    // first entries are the common renderings (项目 stays ahead of 名堂).
+    if (bucket.size >= 5) {
+      return;
+    }
+    bucket.add(simplified);
+  });
+
+  return { pairMap, termPos, reverseGlossIndex };
+}
+
+function mergeCedictAliases(entriesByKey, cedictPairs, termPos, reverseGlossIndex) {
+  // Every level that carries the word gets the same terms, because the pair was
+  // derived from the word rather than from a single level entry.
+  entriesByKey.forEach((entry, key) => {
+    const terms = cedictPairs.get(entry.word);
+    if (terms && terms.size > 0) {
+      // CEDICT order is file order, not frequency (item gives 名堂 before 项目).
+      // ECDICT's `meaning` is ordered by how common the sense is, so terms it
+      // mentions are promoted ahead of the rest.
+      const meaning = String(entry.meaning || '');
+      const ordered = Array.from(terms).sort((left, right) => {
+        const leftRank = meaning.includes(left) ? 0 : 1;
+        const rightRank = meaning.includes(right) ? 0 : 1;
+        return leftRank - rightRank;
+      });
+
+      entriesByKey.set(key, {
+        ...entry,
+        aliases: ordered.slice(0, 5),
+        sourceFlags: entry.sourceFlags.includes('cedict')
+          ? entry.sourceFlags
+          : [...entry.sourceFlags, 'cedict'],
+      });
+      return;
+    }
+
+    // No curated pair survived: fall back to the head of `meaning`. Both sides
+    // must be nouns, and CEDICT must independently translate the English word
+    // back to this term — without that check ~10% of fallbacks are wrong
+    // (充足 → enough where enough is a determiner, 衣服 → clothes where the
+    // Chinese term is a mass noun and the English one is plural).
+    if (getPrimaryPos(entry.partOfSpeech) !== 'noun') {
+      return;
+    }
+    const head = String(entry.meaning || '')
+      .split(/[;；,，、/]/)
+      .map((part) => part.trim())
+      .find((part) => isReplaceableTerm(part));
+    if (!head || termPos.get(head) !== 'noun') {
+      return;
+    }
+    const glossTerms = reverseGlossIndex.get(entry.word);
+    if (!glossTerms || !glossTerms.has(head)) {
+      return;
+    }
+
+    entriesByKey.set(key, { ...entry, aliases: [head] });
   });
 }
 
@@ -1195,8 +1329,11 @@ function sortEntries(entries) {
   });
 }
 
-function writeJson(filePath, payload) {
-  const json = `${JSON.stringify(payload, null, 2)}\n`;
+// Word lists ship inside the extension package, where the release gate measures raw
+// (unpacked) size, so indentation costs budget without helping any consumer.
+function writeJson(filePath, payload, options = {}) {
+  const indent = options.pretty === true ? 2 : undefined;
+  const json = `${JSON.stringify(payload, null, indent)}\n`;
   fs.writeFileSync(filePath, json, { encoding: 'utf8' });
 }
 
@@ -1252,11 +1389,33 @@ function writeDatasetFiles(dataDir, grouped, manifest) {
     const fileName = LEVEL_FILE_MAP[level];
     writeJson(path.join(dataDir, fileName), grouped[level]);
   });
-  writeJson(path.join(dataDir, MANIFEST_FILE_NAME), manifest);
+  writeJson(path.join(dataDir, MANIFEST_FILE_NAME), manifest, { pretty: true });
+  writeAttributionFile(dataDir);
+}
+
+const ATTRIBUTION_TEXT = `# 词库数据来源与许可证
+
+本扩展随附的词库数据（data/ 目录）由以下公开数据源构建。机器可读的来源清单见同目录的 sources.json，完整说明见仓库 docs/词库来源与许可证.md。
+
+- ECDICT — https://github.com/skywind3000/ECDICT （MIT 许可证）：英汉词典，含 CET4/CET6/IELTS/TOEFL/考研标签。
+- Words-CEFR-Dataset — https://github.com/Maximax67/Words-CEFR-Dataset （MIT 许可证）：按词与词性提供 CEFR 等级标注（1-6）。
+- CET 考试大纲词表（2016 年修订版，经 ismartcoding/endict 整理） — https://github.com/ismartcoding/endict （MIT 许可证）：四/六级考纲词目与派生词清单，标记 syllabus 来源并补齐考纲缺失词。
+- CC-CEDICT — https://www.mdbg.net/chinese/dictionary?page=cc-cedict （CC BY-SA 3.0，MDBG 发布版本）：中文释义补充，按许可要求保留署名与相同方式共享。
+
+发布包中的 data/ 目录为 publish-safe 数据集，不包含 KyleBing/english-vocabulary、exam-data/NETEMVocabulary 等未确认许可来源的派生数据。
+`;
+
+function writeAttributionFile(dataDir) {
+  ensureDirectory(dataDir);
+  fs.writeFileSync(path.join(dataDir, ATTRIBUTION_FILE_NAME), ATTRIBUTION_TEXT, 'utf8');
 }
 
 function listPublishedDataFileNames() {
-  return [...LEVELS.map((level) => LEVEL_FILE_MAP[level]), MANIFEST_FILE_NAME];
+  return [
+    ...LEVELS.map((level) => LEVEL_FILE_MAP[level]),
+    MANIFEST_FILE_NAME,
+    ATTRIBUTION_FILE_NAME,
+  ];
 }
 
 async function buildVocabularyDataset(options = {}) {
@@ -1272,17 +1431,32 @@ async function buildVocabularyDataset(options = {}) {
   }
 
   const cefrMap = await buildCefrMap(sourceFiles);
-  const entriesByKey = await buildExamEntries(cefrMap, sourceFiles);
+  const syllabusMap = buildSyllabusMap(sourceFiles);
+  const entriesByKey = await buildExamEntries(cefrMap, syllabusMap, sourceFiles);
   const kylebingMaps = buildKyleBingMaps(sourceFiles);
   const netemMap = buildNetemMap(sourceFiles);
   mergeExamSources(entriesByKey, kylebingMaps, netemMap, cefrMap, {
     includePublishBlockingSources,
   });
 
-  const selectedWords = new Set(Array.from(entriesByKey.values()).map((entry) => entry.word));
-  const cedictSupplement = await buildCedictSupplement(selectedWords, sourceFiles);
-  mergeCedictAliases(entriesByKey, cedictSupplement);
+  // Part of speech drives the CEDICT pairing rules, so it must be resolved
+  // across every level before pairs are derived.
   propagateSharedPartOfSpeech(entriesByKey);
+
+  const selectedWords = new Set(Array.from(entriesByKey.values()).map((entry) => entry.word));
+  const entriesByWord = new Map();
+  entriesByKey.forEach((entry) => {
+    const existing = entriesByWord.get(entry.word);
+    if (!existing || (existing.coverageTier !== 'core' && entry.coverageTier === 'core')) {
+      entriesByWord.set(entry.word, entry);
+    }
+  });
+  const {
+    pairMap: cedictPairs,
+    termPos,
+    reverseGlossIndex,
+  } = await buildCedictTermPairs(selectedWords, entriesByWord, sourceFiles);
+  mergeCedictAliases(entriesByKey, cedictPairs, termPos, reverseGlossIndex);
 
   const grouped = groupEntries(entriesByKey);
   const filteredGrouped = filterDirtyEntries(grouped);
@@ -1319,6 +1493,7 @@ if (require.main === module) {
 }
 
 module.exports = {
+  ATTRIBUTION_FILE_NAME,
   buildVocabularyDataset,
   createSourceManifest,
   hasPublishBlockingFlag,
@@ -1326,4 +1501,5 @@ module.exports = {
   normalizeBuildTarget,
   parseCliArgs,
   shouldIncludePublishBlockingSources,
+  writeAttributionFile,
 };

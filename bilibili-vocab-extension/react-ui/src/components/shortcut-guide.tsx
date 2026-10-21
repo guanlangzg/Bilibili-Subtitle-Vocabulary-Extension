@@ -227,5 +227,3 @@ export function ShortcutGuide({
     </section>
   );
 }
-
-export { SHORTCUTS };

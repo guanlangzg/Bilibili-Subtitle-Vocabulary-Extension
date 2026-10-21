@@ -45,6 +45,7 @@ test('lint entry contract: should run eslint on explicit source roots', () => {
   assert.match(lintScript, /"\*\.cjs"/);
   assert.match(lintScript, /"scripts"/);
   assert.match(lintScript, /"tests"/);
+  assert.match(lintScript, /"contentScript"/);
   assert.match(lintScript, /"react-ui\/src"/);
   assert.match(lintScript, /--max-warnings\s+0/);
 });

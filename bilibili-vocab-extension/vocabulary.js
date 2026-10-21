@@ -14,24 +14,14 @@
 
   const {
     LEVELS,
-    LEVEL_CLASS_MAP,
     LEVEL_PRIORITY,
     DEFAULT_ACTIVE_LEVELS,
-    REVIEW_BUCKETS,
-    DEFAULT_INTERVAL_DAYS,
-    DEFAULT_EASE_FACTOR,
-    MIN_EASE_FACTOR,
-    MAX_EASE_FACTOR,
-    MAX_INTERVAL_DAYS,
     ADAPTIVE_FEEDBACK_ACTIONS,
     normalizeLevel,
     normalizeWordKey,
     normalizeActiveLevels,
-    splitMeaning,
-    extractAliasTerms,
     normalizeHitCount,
     normalizeLastSeen,
-    normalizeLearningStatus,
     normalizeReviewBucket,
     getIntervalByBucket,
     normalizeIntervalDays,
@@ -43,9 +33,9 @@
     normalizeLearningStats,
     getLevelPriority,
     getLevelClass,
-    getCoverageTierPriority,
     getCandidatePriority,
-    createEntrySnapshotWithRecord,
+    isMatchableTerm,
+    COMPOUND_SUFFIXES,
     applyLearningRecordToEntry,
   } = Pure;
 
@@ -76,12 +66,19 @@
   let vocabularyEntries = [];
   let loadPromise = null;
   const chineseTokenIndex = new Map();
-  let sortedChineseTokens = [];
+  let chineseTokenMaxLength = 2;
+  // Levels whose rows include a curated `core` tier; recomputed with the index.
+  let coreLevelsInDataset = new Set();
   const wordIndex = new Map();
+  // One learning record exists per word, so every level entry sharing a word must show it.
+  const wordEntriesIndex = new Map();
   let persistTimer = null;
   let persistChain = Promise.resolve();
   let reviewQueue = {};
   let learningSummary = null;
+  const learningHitOutbox = [];
+  let learningHitOutboxFlushPromise = null;
+  const LEARNING_HIT_OUTBOX_LIMIT = 100;
 
   function getChromeRuntimeError() {
     if (typeof chrome === 'undefined' || !chrome.runtime) {
@@ -135,15 +132,56 @@
     });
   }
 
+  function enqueueLearningHitOutbox(entry) {
+    learningHitOutbox.push(entry);
+    while (learningHitOutbox.length > LEARNING_HIT_OUTBOX_LIMIT) {
+      learningHitOutbox.shift();
+    }
+  }
+
+  function flushLearningHitOutbox() {
+    if (learningHitOutboxFlushPromise) {
+      return learningHitOutboxFlushPromise;
+    }
+    if (learningHitOutbox.length === 0) {
+      return Promise.resolve(null);
+    }
+
+    learningHitOutboxFlushPromise = (async () => {
+      while (learningHitOutbox.length > 0) {
+        const entry = learningHitOutbox[0];
+        try {
+          await sendRuntimeMessage('BILI_VOCAB_LEARNING_RECORD_HIT', entry);
+          learningHitOutbox.shift();
+        } catch (error) {
+          logError('Vocabulary hit outbox flush failed', error);
+          break;
+        }
+      }
+      return null;
+    })().finally(() => {
+      learningHitOutboxFlushPromise = null;
+    });
+
+    return learningHitOutboxFlushPromise;
+  }
+
   function persistLearningHit(record, payload, now) {
-    return sendRuntimeMessage('BILI_VOCAB_LEARNING_RECORD_HIT', {
+    const messagePayload = {
       ...payload,
       record,
       now,
-    }).catch((error) => {
-      logError('Vocabulary hit background persist failed', error);
-      return null;
-    });
+    };
+    return sendRuntimeMessage('BILI_VOCAB_LEARNING_RECORD_HIT', messagePayload)
+      .then((result) => {
+        void flushLearningHitOutbox();
+        return result;
+      })
+      .catch((error) => {
+        logError('Vocabulary hit background persist failed', error);
+        enqueueLearningHitOutbox(messagePayload);
+        return null;
+      });
   }
 
   function persistLearningReviewFeedback(word, action, now) {
@@ -268,6 +306,21 @@
     }, {});
   }
 
+  // Rebuilding this map from all entries on every hit costs O(catalog); keep it incremental instead.
+  let activeLearningRecords = {};
+
+  function rebuildActiveLearningRecords() {
+    activeLearningRecords = buildActiveLearningRecords(vocabularyEntries);
+    return activeLearningRecords;
+  }
+
+  function updateActiveLearningRecord(key, entry) {
+    if (!key || !entry) {
+      return;
+    }
+    activeLearningRecords[key] = toLearningRecord(entry);
+  }
+
   function createPersistSnapshot(
     entries = vocabularyEntries,
     queueState = reviewQueue,
@@ -381,6 +434,19 @@
     }
   }
 
+  function applyRecordToWordEntries(wordKey, record) {
+    const entries = wordEntriesIndex.get(wordKey);
+    if (!entries || !record) {
+      return;
+    }
+
+    entries.forEach((entry, index) => {
+      const updated = applyLearningRecordToEntry(entry, record);
+      entries[index] = updated;
+      replaceEntryInIndexes(entry, updated);
+    });
+  }
+
   function applyStoredStats(entries, storedData) {
     const records = storedData && storedData.learningRecords ? storedData.learningRecords : {};
     entries.forEach((entry, index) => {
@@ -397,31 +463,58 @@
       storedData && storedData.summary ? storedData.summary : refreshLearningSummary(records);
   }
 
+  // `core` narrows to the curated tier, but IELTS/TOEFL carry no core entries and
+  // a publish build has none at any level. Deciding per token would let those
+  // levels leak `full` words in while other tokens stay hidden, so the fallback is
+  // decided per level: a level with no core rows contributes its full tier.
+  function collectCoreLevelDataset(entries) {
+    const coreLevels = new Set();
+    const levels = new Set();
+    (entries || []).forEach((entry) => {
+      if (!entry.level) {
+        return;
+      }
+      levels.add(entry.level);
+      if (entry.coverageTier === 'core') {
+        coreLevels.add(entry.level);
+      }
+    });
+    return { coreLevels, levels };
+  }
+
   function rebuildIndex(entries) {
     chineseTokenIndex.clear();
     wordIndex.clear();
+    wordEntriesIndex.clear();
+    chineseTokenMaxLength = 2;
 
     entries.forEach((entry) => {
       const wordKey = normalizeWordKey(entry.word);
       if (wordKey) {
         wordIndex.set(wordKey, entry);
+        if (!wordEntriesIndex.has(wordKey)) {
+          wordEntriesIndex.set(wordKey, []);
+        }
+        wordEntriesIndex.get(wordKey).push(entry);
       }
 
-      entry.meaningTerms.forEach((term) => {
-        const token = String(term || '').trim();
-        if (!token || token.length < 2) {
+      const terms = Array.isArray(entry.matchTerms) ? entry.matchTerms : [];
+      terms.forEach((term) => {
+        if (!isMatchableTerm(term)) {
           return;
         }
 
-        if (!chineseTokenIndex.has(token)) {
-          chineseTokenIndex.set(token, []);
+        if (!chineseTokenIndex.has(term)) {
+          chineseTokenIndex.set(term, []);
+          chineseTokenMaxLength = Math.max(chineseTokenMaxLength, Array.from(term).length);
         }
 
-        chineseTokenIndex.get(token).push(entry);
+        chineseTokenIndex.get(term).push(entry);
       });
     });
 
-    sortedChineseTokens = Array.from(chineseTokenIndex.keys()).sort((a, b) => b.length - a.length);
+    coreLevelsInDataset = collectCoreLevelDataset(entries).coreLevels;
+    rebuildActiveLearningRecords();
   }
 
   async function fetchLevelVocabulary(level) {
@@ -469,6 +562,7 @@
         vocabularyEntries = [];
         chineseTokenIndex.clear();
         wordIndex.clear();
+        wordEntriesIndex.clear();
         return vocabularyEntries;
       })
       .finally(() => {
@@ -485,6 +579,218 @@
     return vocabularyEntries;
   }
 
+  // Cached because Intl.Segmenter construction is comparatively expensive and
+  // subtitles arrive once per line.
+  let segmenterInstance;
+  function getSegmenter() {
+    if (segmenterInstance !== undefined) {
+      return segmenterInstance;
+    }
+    segmenterInstance =
+      typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function'
+        ? new Intl.Segmenter('zh', { granularity: 'word' })
+        : null;
+    return segmenterInstance;
+  }
+
+  function segmentWords(source) {
+    const segmenter = getSegmenter();
+    if (!segmenter) {
+      return null;
+    }
+    return Array.from(segmenter.segment(source), (item) => ({
+      text: item.segment,
+      index: item.index,
+    }));
+  }
+
+  // `core` narrows to the curated tier. Some datasets have no core rows at all for
+  // the user's levels (IELTS/TOEFL, and every level in a publish build), so the
+  // mode falls back to the full tier for those levels instead of replacing
+  // nothing. Whether a fallback is in effect is decided once per call, because a
+  // per-token decision would leak full-tier words next to core ones.
+  function resolveCoreFallback(allowedLevels) {
+    for (const level of allowedLevels) {
+      if (coreLevelsInDataset.has(level)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  function resolveSelectedEntry(
+    token,
+    allowedLevels,
+    vocabularyMode,
+    selectedCache,
+    allowFullTier
+  ) {
+    if (selectedCache.has(token)) {
+      return selectedCache.get(token);
+    }
+
+    const candidates = chineseTokenIndex.get(token);
+    let selectedEntry = null;
+    if (candidates) {
+      const levelCandidates = candidates.filter((entry) => allowedLevels.has(entry.level));
+      const filtered =
+        vocabularyMode === 'core' && !allowFullTier
+          ? levelCandidates.filter((entry) => entry.coverageTier === 'core')
+          : levelCandidates;
+
+      if (filtered.length > 0) {
+        selectedEntry =
+          filtered.length === 1
+            ? filtered[0]
+            : filtered.reduce((best, curr) => {
+                return getCandidatePriority(curr, vocabularyMode) >
+                  getCandidatePriority(best, vocabularyMode)
+                  ? curr
+                  : best;
+              });
+      }
+    }
+
+    selectedCache.set(token, selectedEntry);
+    return selectedEntry;
+  }
+
+  function buildMatch(start, end, token, selectedEntry) {
+    return {
+      start,
+      end,
+      chinese: token,
+      word: selectedEntry.word,
+      meaning: selectedEntry.meaning,
+      level: selectedEntry.level,
+      cefrLevel: selectedEntry.cefrLevel,
+      cefrRank: selectedEntry.cefrRank,
+      frequency: selectedEntry.frequency,
+      coverageTier: selectedEntry.coverageTier,
+      sourceFlags: selectedEntry.sourceFlags,
+      altMeanings: selectedEntry.altMeanings,
+      examFrequencyScore: selectedEntry.examFrequencyScore,
+      examPriorityScore: selectedEntry.examPriorityScore,
+      learningStatus: selectedEntry.learningStatus,
+      isPhraseBacked: selectedEntry.isPhraseBacked,
+      phraseCount: selectedEntry.phraseCount,
+      phonetic: selectedEntry.phonetic,
+      partOfSpeech: selectedEntry.partOfSpeech,
+      definition: selectedEntry.definition,
+    };
+  }
+
+  // Matches only inside word boundaries. Substring matching broke compounds apart
+  // (电影院 → film院, 一个人 → company个人), so the source is segmented first and
+  // spans never cross a segment boundary.
+  function collectSegmentedMatches(
+    source,
+    allowedLevels,
+    vocabularyMode,
+    selectedCache,
+    allowFullTier
+  ) {
+    const words = segmentWords(source);
+    if (!words) {
+      return null;
+    }
+
+    const matches = [];
+    for (let index = 0; index < words.length; index += 1) {
+      let consumed = 0;
+      for (
+        let length = Math.min(chineseTokenMaxLength, words.length - index);
+        length >= 1;
+        length -= 1
+      ) {
+        const span = words.slice(index, index + length);
+        const token = span.map((word) => word.text).join('');
+        if (!isMatchableTerm(token)) {
+          continue;
+        }
+
+        // A trailing single character that forms a longer word means this span is
+        // only a fragment (孩子 + 们, 电影 + 院).
+        const nextWord = words[index + length];
+        if (
+          nextWord &&
+          Array.from(nextWord.text).length === 1 &&
+          COMPOUND_SUFFIXES.has(nextWord.text)
+        ) {
+          continue;
+        }
+
+        const selectedEntry = resolveSelectedEntry(
+          token,
+          allowedLevels,
+          vocabularyMode,
+          selectedCache,
+          allowFullTier
+        );
+        if (!selectedEntry) {
+          continue;
+        }
+
+        const lastWord = span[span.length - 1];
+        matches.push(
+          buildMatch(span[0].index, lastWord.index + lastWord.text.length, token, selectedEntry)
+        );
+        consumed = length;
+        break;
+      }
+      if (consumed > 1) {
+        index += consumed - 1;
+      }
+    }
+
+    return matches;
+  }
+
+  // Fallback for runtimes without Intl.Segmenter: scan longest-first, but still
+  // reject spans followed by a compound suffix.
+  function collectSubstringMatches(
+    source,
+    allowedLevels,
+    vocabularyMode,
+    selectedCache,
+    allowFullTier
+  ) {
+    const matches = [];
+    const tokens = Array.from(chineseTokenIndex.keys()).sort(
+      (left, right) => Array.from(right).length - Array.from(left).length
+    );
+
+    tokens.forEach((token) => {
+      let fromIndex = 0;
+      while (fromIndex < source.length) {
+        const foundIndex = source.indexOf(token, fromIndex);
+        if (foundIndex < 0) {
+          break;
+        }
+        const after = source.slice(foundIndex + token.length);
+        const nextChar = Array.from(after)[0];
+        const blocked = Boolean(nextChar && COMPOUND_SUFFIXES.has(nextChar));
+
+        if (!blocked) {
+          const selectedEntry = resolveSelectedEntry(
+            token,
+            allowedLevels,
+            vocabularyMode,
+            selectedCache,
+            allowFullTier
+          );
+          if (selectedEntry) {
+            matches.push(buildMatch(foundIndex, foundIndex + token.length, token, selectedEntry));
+          }
+        }
+
+        fromIndex = foundIndex + token.length;
+      }
+    });
+
+    return matches;
+  }
+
   function findMatchesInText(text, activeLevels, selectionSettings) {
     const source = String(text || '');
     if (!source) {
@@ -497,74 +803,17 @@
         ? sharedSettings.normalizeVocabularyMode(selectionSettings.vocabularyMode)
         : 'core'
       : 'full';
-    const matches = [];
     const selectedCache = new Map();
-
-    for (const token of sortedChineseTokens) {
-      const firstIndex = source.indexOf(token);
-      if (firstIndex < 0) continue;
-
-      const candidates = chineseTokenIndex.get(token);
-      if (!candidates) continue;
-
-      let selectedEntry = selectedCache.get(token);
-      if (!selectedEntry) {
-        const filtered = candidates.filter((entry) => {
-          if (!allowedLevels.has(entry.level)) {
-            return false;
-          }
-
-          if (vocabularyMode === 'core') {
-            return entry.coverageTier === 'core';
-          }
-
-          return true;
-        });
-        if (filtered.length === 0) continue;
-
-        selectedEntry =
-          filtered.length === 1
-            ? filtered[0]
-            : filtered.reduce((best, curr) => {
-                return getCandidatePriority(curr, vocabularyMode) >
-                  getCandidatePriority(best, vocabularyMode)
-                  ? curr
-                  : best;
-              });
-        selectedCache.set(token, selectedEntry);
-      }
-
-      let startIndex = 0;
-      while (startIndex < source.length) {
-        const foundIndex = source.indexOf(token, startIndex);
-        if (foundIndex < 0) break;
-
-        matches.push({
-          start: foundIndex,
-          end: foundIndex + token.length,
-          chinese: token,
-          word: selectedEntry.word,
-          meaning: selectedEntry.meaning,
-          level: selectedEntry.level,
-          cefrLevel: selectedEntry.cefrLevel,
-          cefrRank: selectedEntry.cefrRank,
-          frequency: selectedEntry.frequency,
-          coverageTier: selectedEntry.coverageTier,
-          sourceFlags: selectedEntry.sourceFlags,
-          altMeanings: selectedEntry.altMeanings,
-          examFrequencyScore: selectedEntry.examFrequencyScore,
-          examPriorityScore: selectedEntry.examPriorityScore,
-          learningStatus: selectedEntry.learningStatus,
-          isPhraseBacked: selectedEntry.isPhraseBacked,
-          phraseCount: selectedEntry.phraseCount,
-          phonetic: selectedEntry.phonetic,
-          partOfSpeech: selectedEntry.partOfSpeech,
-          definition: selectedEntry.definition,
-        });
-
-        startIndex = foundIndex + token.length;
-      }
-    }
+    const allowFullTier = vocabularyMode === 'core' ? resolveCoreFallback(allowedLevels) : true;
+    const matches =
+      collectSegmentedMatches(
+        source,
+        allowedLevels,
+        vocabularyMode,
+        selectedCache,
+        allowFullTier
+      ) ??
+      collectSubstringMatches(source, allowedLevels, vocabularyMode, selectedCache, allowFullTier);
 
     matches.sort((a, b) => {
       if (a.start !== b.start) {
@@ -612,10 +861,10 @@
         sourceLevels: entry.sourceLevels || [entry.level],
       };
       const nextRecord = learningState.recordExposure(previousRecord, exposurePayload, now);
-      const updated = applyLearningRecordToEntry(entry, nextRecord);
-      replaceEntryInIndexes(entry, updated);
+      applyRecordToWordEntries(key, nextRecord);
+      updateActiveLearningRecord(key, wordIndex.get(key));
       reviewQueue = learningState.syncReviewQueue(reviewQueue, nextRecord, now);
-      refreshLearningSummary(buildActiveLearningRecords(vocabularyEntries));
+      refreshLearningSummary(activeLearningRecords);
       void persistLearningHit(previousRecord, exposurePayload, now);
     } else {
       entry.hitCount = normalizeHitCount(entry.hitCount) + 1;
@@ -627,31 +876,6 @@
       void learningState.updateLearningStreak(now);
     }
     return true;
-  }
-
-  function getLearningSummary() {
-    if (!learningState) {
-      return {
-        todayCount: 0,
-        soonCount: 0,
-        queueCount: 0,
-        unseenCount: 0,
-        seenCount: 0,
-        savedCount: 0,
-        skippedCount: 0,
-        newCount: 0,
-        learningCount: 0,
-        reviewingCount: 0,
-        masteredCount: 0,
-        recentWords: [],
-      };
-    }
-
-    if (!learningSummary) {
-      refreshLearningSummary(buildActiveLearningRecords(vocabularyEntries));
-    }
-
-    return learningSummary || learningState.buildLearningSummary({}, {});
   }
 
   function getReviewQueue(limit = 5) {
@@ -759,6 +983,8 @@
             : learningState.applyReviewFeedback(toLearningRecord(entry), normalizedAction, now);
       const updated = applyLearningRecordToEntry(entry, committedRecord);
       replaceEntryInIndexes(entry, updated);
+      applyRecordToWordEntries(key, committedRecord);
+      updateActiveLearningRecord(key, wordIndex.get(key));
       reviewQueue =
         committedPayload && committedPayload.queue && typeof committedPayload.queue === 'object'
           ? learningState.normalizeReviewQueue(committedPayload.queue)
@@ -766,7 +992,7 @@
       learningSummary =
         committedPayload && committedPayload.summary && typeof committedPayload.summary === 'object'
           ? committedPayload.summary
-          : refreshLearningSummary(buildActiveLearningRecords(vocabularyEntries));
+          : refreshLearningSummary(activeLearningRecords);
       maybePersistAdaptiveFeedback(normalizedAction, now);
       if (typeof learningState.updateLearningStreak === 'function') {
         void learningState.updateLearningStreak(now);
@@ -823,10 +1049,10 @@
     refreshLearningStateFromStorage,
     findMatchesInText,
     recordHit,
+    flushLearningHitOutbox,
     applyLearningAction,
     reviewWord,
     getReviewQueue,
-    getLearningSummary,
     getEncounteredWords,
     __setEntriesForTest,
   };

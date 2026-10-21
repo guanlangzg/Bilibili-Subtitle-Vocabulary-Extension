@@ -152,8 +152,13 @@
 
     return new Promise((resolve) => {
       chrome.storage.local.get([STORAGE_KEY], (payload) => {
-        const rawState = payload && payload[STORAGE_KEY];
-        resolve(normalizeState(rawState));
+        if (chrome.runtime && chrome.runtime.lastError) {
+          // Keep the current in-memory state instead of silently resetting counters.
+          logStorageError('read', chrome.runtime.lastError);
+          resolve(cloneState(memoryState));
+          return;
+        }
+        resolve(normalizeState(payload && payload[STORAGE_KEY]));
       });
     });
   }
@@ -165,14 +170,25 @@
       return Promise.resolve(normalized);
     }
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       chrome.storage.local.set(
         {
           [STORAGE_KEY]: normalized,
         },
-        () => resolve(normalized)
+        () => {
+          if (chrome.runtime && chrome.runtime.lastError) {
+            logStorageError('write', chrome.runtime.lastError);
+            reject(chrome.runtime.lastError);
+            return;
+          }
+          resolve(normalized);
+        }
       );
     });
+  }
+
+  function logStorageError(action, runtimeError) {
+    console.error(`[BiliVocab] Experience metrics storage ${action} failed:`, runtimeError);
   }
 
   function resolveCounterKeysByEvent(type, options = {}) {

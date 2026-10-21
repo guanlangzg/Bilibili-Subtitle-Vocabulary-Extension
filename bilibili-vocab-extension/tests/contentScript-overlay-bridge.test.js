@@ -6,7 +6,6 @@ const previousChrome = global.chrome;
 const previousLocation = global.location;
 const previousSubtitleParser = global.SubtitleParser;
 const previousReactOverlayModule = global.ReactOverlayModule;
-const previousOverlayPanelModule = global.OverlayPanelModule;
 
 function cloneJson(value) {
   return value == null ? value : JSON.parse(JSON.stringify(value));
@@ -341,6 +340,5 @@ test.after(() => {
   global.location = previousLocation;
   global.SubtitleParser = previousSubtitleParser;
   global.ReactOverlayModule = previousReactOverlayModule;
-  global.OverlayPanelModule = previousOverlayPanelModule;
   delete require.cache[require.resolve('../contentScript/index.js')];
 });

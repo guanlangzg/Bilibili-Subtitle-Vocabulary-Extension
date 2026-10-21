@@ -88,36 +88,6 @@
     return normalizedSettings;
   }
 
-  async function persistAdaptiveManualOverride(messagePayload) {
-    if (!adaptiveTuning || !experienceMetrics) {
-      throw new Error('Adaptive modules unavailable');
-    }
-
-    const options =
-      messagePayload && typeof messagePayload.options === 'object' ? messagePayload.options : {};
-    const now = normalizeTimestamp(options.now) || Date.now();
-    const currentPayload = await getStoragePayload([
-      adaptiveTuning.STORAGE_KEYS.STATE,
-      experienceMetrics.STORAGE_KEY,
-    ]);
-    const nextAdaptiveState = adaptiveTuning.markManualOverride(
-      currentPayload[adaptiveTuning.STORAGE_KEYS.STATE],
-      now,
-      options.durationMs
-    );
-    const nextMetricsState = experienceMetrics.applyEventToState(
-      currentPayload[experienceMetrics.STORAGE_KEY],
-      'adaptive-manual-override',
-      { now }
-    );
-
-    await setStoragePayload({
-      [adaptiveTuning.STORAGE_KEYS.STATE]: nextAdaptiveState,
-      [experienceMetrics.STORAGE_KEY]: nextMetricsState,
-    });
-    return nextAdaptiveState;
-  }
-
   async function persistAdaptiveFeedback(messagePayload) {
     if (!adaptiveTuning || !experienceMetrics) {
       throw new Error('Adaptive modules unavailable');
@@ -211,17 +181,31 @@
     return nextMetricsState;
   }
 
-  function handleBackgroundMessage(message, sendResponse) {
+  function handleBackgroundMessage(message, sender, sendResponse) {
+    const respond =
+      typeof sendResponse === 'function'
+        ? sendResponse
+        : typeof sender === 'function'
+          ? sender
+          : null;
+    const messageSender = typeof sender === 'function' ? null : sender;
+
+    if (
+      runtimeMessaging &&
+      typeof runtimeMessaging.isTrustedExtensionSender === 'function' &&
+      !runtimeMessaging.isTrustedExtensionSender(messageSender)
+    ) {
+      if (typeof respond === 'function') {
+        respond({ ok: false, error: 'Untrusted extension sender' });
+      }
+      return false;
+    }
+
     const messageType = String(message && message.type ? message.type : '').trim();
     let task = null;
 
     if (runtimeMessaging && messageType === runtimeMessaging.MESSAGE_TYPES.SETTINGS_COMMIT) {
       task = () => commitSettingsPayload(message.payload || {});
-    } else if (
-      runtimeMessaging &&
-      messageType === runtimeMessaging.MESSAGE_TYPES.ADAPTIVE_MANUAL_OVERRIDE
-    ) {
-      task = () => persistAdaptiveManualOverride(message.payload || {});
     } else if (
       runtimeMessaging &&
       messageType === runtimeMessaging.MESSAGE_TYPES.ADAPTIVE_PERSIST_FEEDBACK
@@ -247,19 +231,38 @@
       messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_APPLY_REVIEW_FEEDBACK
     ) {
       task = () => backgroundLearningState.applyReviewFeedback(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_SAVE_WORD
+    ) {
+      task = () => backgroundLearningState.saveWord(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_REMOVE_WORD
+    ) {
+      task = () => backgroundLearningState.removeWord(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_CLEAR_VOCABULARY
+    ) {
+      task = () => backgroundLearningState.clearVocabulary();
     }
 
     if (!task) {
       return false;
     }
 
+    if (typeof respond !== 'function') {
+      return false;
+    }
+
     enqueueSharedStateMutation(task).then(
       (payload) => {
-        sendResponse({ ok: true, payload });
+        respond({ ok: true, payload });
       },
       (error) => {
         logBackgroundError(`Failed to process ${messageType}`, error);
-        sendResponse({
+        respond({
           ok: false,
           error: toMessageError(error, `Failed to process ${messageType}`),
         });
@@ -271,7 +274,6 @@
   const api = {
     enqueueSharedStateMutation,
     commitSettingsPayload,
-    persistAdaptiveManualOverride,
     persistAdaptiveFeedback,
     setAdaptiveEnabled,
     recordExperienceEvent,

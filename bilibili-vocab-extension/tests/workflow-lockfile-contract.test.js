@@ -120,7 +120,7 @@ test('workflow lockfile contract: lockfile major should match packageManager pnp
 
 test('workflow lockfile contract: report-only continuous optimization should not install dependencies', () => {
   const workflow = readWorkflow('ci.yml');
-  const job = readWorkflowJob(workflow, 'continuous-optimization');
+  const job = readWorkflowJob(workflow, 'continuous-optimization-inventory');
 
   assert.doesNotMatch(job, /uses:\s*pnpm\/action-setup@v4/);
   assert.doesNotMatch(job, /pnpm install/);

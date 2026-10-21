@@ -529,32 +529,6 @@ test('shouldReplaceWebTextNode: should keep real replacements', () => {
   );
 });
 
-test('renderWebTextReplacementHtml: should pass runtime settings to renderer', () => {
-  const renderer = require('../renderer.js');
-  global.VocabularyModule = {
-    getLevelClass() {
-      return 'level-cet4';
-    },
-  };
-  global.SubtitleRenderer = renderer;
-
-  const result = {
-    mixedText: '我想system学习',
-    tokens: [
-      { type: 'text', text: '我想' },
-      { type: 'word', word: 'system', sourceText: '系统', meaning: '系统', level: 'CET4' },
-      { type: 'text', text: '学习' },
-    ],
-  };
-  const settings = { bilingualMode: 'bilingual' };
-  const html = contentScript.renderWebTextReplacementHtml(result, '我想系统学习', settings);
-
-  assert.match(html, /class="bsv-bilingual-line"/);
-  assert.match(html, /class="bsv-bilingual-translation"/);
-  assert.match(html, /data-original-subtitle="我想系统学习"/);
-  assert.match(html, />我想系统学习</);
-});
-
 test('buildRuntimeSettings: should merge updates on top of runtime baseline', () => {
   const next = contentScript.buildRuntimeSettings(
     {

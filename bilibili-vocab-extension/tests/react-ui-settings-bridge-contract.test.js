@@ -6,6 +6,14 @@ const vm = require('node:vm');
 const ts = require('typescript');
 
 const SOURCE_PATH = path.join(__dirname, '..', 'react-ui', 'src', 'lib', 'settings-bridge.ts');
+const BRIDGE_CORE_SOURCE_PATH = path.join(
+  __dirname,
+  '..',
+  'react-ui',
+  'src',
+  'lib',
+  'settings-bridge-core.ts'
+);
 const SHARED_SETTINGS_SOURCE_PATH = path.join(__dirname, '..', 'sharedSettings.js');
 const FIXED_NOW = 1700000000000;
 
@@ -30,6 +38,19 @@ function transpileTsModule(sourcePath) {
   }).outputText;
 }
 
+function loadBridgeCoreModule(sandbox) {
+  const coreCode = transpileTsModule(BRIDGE_CORE_SOURCE_PATH);
+  const coreModuleRef = { exports: {} };
+  const previousModule = sandbox.module;
+  const previousExports = sandbox.exports;
+  sandbox.module = coreModuleRef;
+  sandbox.exports = coreModuleRef.exports;
+  vm.runInNewContext(coreCode, sandbox, { filename: 'settings-bridge-core.js' });
+  sandbox.module = previousModule;
+  sandbox.exports = previousExports;
+  return coreModuleRef.exports;
+}
+
 function createSettingsBridgeModule(options = {}) {
   const bridgeCode = transpileTsModule(SOURCE_PATH);
   const sharedCode = fs.readFileSync(SHARED_SETTINGS_SOURCE_PATH, 'utf8');
@@ -42,6 +63,9 @@ function createSettingsBridgeModule(options = {}) {
     require(id) {
       if (id === './settings-normalizer') {
         return {};
+      }
+      if (id === './settings-bridge-core') {
+        return loadBridgeCoreModule(sandbox);
       }
       return require(id);
     },

@@ -14,7 +14,7 @@
     reviewDanmakuDensity: 'normal',
     vocabularyMode: 'core',
     examPreference: 'balanced',
-    webPageEnabled: true,
+    webPageEnabled: false,
     domainRules: {},
     activeLevels: LEVELS.slice(),
     replaceRatio: 0.2,
@@ -22,10 +22,6 @@
     targetCefr: 'B2',
     bilingualMode: 'default',
     themeMode: 'auto',
-  };
-
-  const STORAGE_KEYS = {
-    WORD_STATS: 'bili_vocab_word_stats_v1',
   };
 
   const api = {
@@ -36,7 +32,6 @@
     VOCABULARY_MODES,
     EXAM_PREFERENCES,
     DEFAULT_SETTINGS,
-    STORAGE_KEYS,
   };
 
   globalScope.Config = api;

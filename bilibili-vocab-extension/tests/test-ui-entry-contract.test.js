@@ -160,6 +160,7 @@ test('test ui entry contract: current workspace should include every named ui te
       (name) =>
         name.startsWith('background-overlay') ||
         name.startsWith('react-overlay-') ||
+        name.startsWith('react-settings-') ||
         name.startsWith('react-ui-') ||
         [
           'contentScript-overlay-bridge.test.js',

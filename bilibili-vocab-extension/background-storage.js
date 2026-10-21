@@ -6,6 +6,10 @@
     globalScope.BackgroundSettings ||
     (typeof require === 'function' ? require('./background-settings.js') : null);
 
+  const learningState =
+    globalScope.LearningState ||
+    (typeof require === 'function' ? require('./learningState.js') : null);
+
   const sharedSettings = backgroundSettings && backgroundSettings.sharedSettings;
 
   // Legacy storage keys retained for backward compatibility with existing installs.
@@ -19,6 +23,8 @@
   const LEARNING_SUMMARY_KEY = 'bili_vocab_learning_summary_v1';
   const MAX_STORAGE_SIZE_BYTES = 10 * 1024 * 1024;
   const STORAGE_WARNING_THRESHOLD = 0.8;
+  const STORAGE_CHECK_INTERVAL_MS = 60 * 1000;
+  let lastStorageCheckAt = 0;
   const STALE_LOW_VALUE_WORD_MS = 90 * 24 * 60 * 60 * 1000;
 
   function getChromeRuntimeError() {
@@ -148,6 +154,11 @@
   }
 
   function buildCleanedLearningSummary(records, queue) {
+    // Keep one summary implementation: cleanup must not emit values the runtime would not.
+    if (learningState && typeof learningState.buildLearningSummary === 'function') {
+      return learningState.buildLearningSummary(records, queue);
+    }
+
     const recordMap = records && typeof records === 'object' ? records : {};
     const queueMap = queue && typeof queue === 'object' ? queue : {};
     const summary = {
@@ -325,7 +336,23 @@
     }
   }
 
-  async function checkAndCleanStorageIfNeeded() {
+  function shouldCheckStorageUsage(force = false) {
+    if (force) {
+      return true;
+    }
+    const now = Date.now();
+    if (now - lastStorageCheckAt < STORAGE_CHECK_INTERVAL_MS) {
+      return false;
+    }
+    lastStorageCheckAt = now;
+    return true;
+  }
+
+  async function checkAndCleanStorageIfNeeded(options = {}) {
+    const force = Boolean(options && options.force);
+    if (!shouldCheckStorageUsage(force)) {
+      return;
+    }
     if (
       typeof chrome === 'undefined' ||
       !chrome.storage ||

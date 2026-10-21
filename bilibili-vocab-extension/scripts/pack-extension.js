@@ -420,6 +420,12 @@ function collectManifestPackEntries(rootDir, manifestFile = 'manifest.json') {
     collectManifestPathValues(rootDir, entries, item && item.resources);
   });
 
+  // Vocabulary JSON is fetched by content scripts via chrome.runtime.getURL with
+  // the page origin, so it must stay listed in web_accessible_resources (MV3).
+  if (fs.existsSync(path.join(rootDir, 'data')) && !entries.includes('data')) {
+    entries.push('data');
+  }
+
   return collectRuntimeDependencyEntries(rootDir, entries);
 }
 

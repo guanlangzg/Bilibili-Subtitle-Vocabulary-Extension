@@ -119,7 +119,10 @@
       return nodeFilter.FILTER_REJECT;
     }
 
-    if (typeof parent.closest === 'function' && parent.closest('.bsv-word, .bsv-tooltip')) {
+    if (
+      typeof parent.closest === 'function' &&
+      parent.closest('.bsv-word, .bsv-tooltip, [data-bsv-web-wrap]')
+    ) {
       return nodeFilter.FILTER_REJECT;
     }
 
@@ -281,6 +284,8 @@
     const bilingualMode = (runtimeSettings && runtimeSettings.bilingualMode) || 'default';
     const mixedText = result && typeof result.mixedText === 'string' ? result.mixedText : source;
     const wrapper = doc.createElement('span');
+    // Mark our own output so the next tree walk does not re-wrap it (nested spans would grow forever).
+    setAttribute(wrapper, 'data-bsv-web-wrap', '1');
 
     if (bilingualMode === 'bilingual' && source && mixedText !== source) {
       const line = doc.createElement('span');

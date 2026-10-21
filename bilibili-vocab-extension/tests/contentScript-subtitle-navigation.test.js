@@ -8,7 +8,6 @@ const previousChrome = global.chrome;
 const previousLocation = global.location;
 const previousSubtitleParser = global.SubtitleParser;
 const previousReactOverlayModule = global.ReactOverlayModule;
-const previousOverlayPanelModule = global.OverlayPanelModule;
 const previousHTMLVideoElement = global.HTMLVideoElement;
 let runtimeConnectListener = null;
 const runtimeMessageListeners = [];
@@ -32,6 +31,7 @@ global.document = {
 
 global.chrome = {
   runtime: {
+    id: 'test-extension-id',
     getURL() {
       return 'data:text/javascript,export%20function%20mountOverlayPanel(){}';
     },
@@ -75,7 +75,9 @@ function dispatchRuntimeMessage(message) {
   return new Promise((resolve) => {
     let handled = false;
     for (const listener of runtimeMessageListeners) {
-      const keepChannelOpen = listener(message, {}, (response) => {
+      // RuntimeMessaging.isTrustedExtensionSender is fail-closed, so the mock
+      // sender must look like a same-extension message (sender.id === runtime.id).
+      const keepChannelOpen = listener(message, { id: global.chrome.runtime.id }, (response) => {
         if (handled) {
           return;
         }
@@ -807,7 +809,6 @@ test.after(() => {
   global.location = previousLocation;
   global.SubtitleParser = previousSubtitleParser;
   global.ReactOverlayModule = previousReactOverlayModule;
-  global.OverlayPanelModule = previousOverlayPanelModule;
   global.HTMLVideoElement = previousHTMLVideoElement;
   delete require.cache[contentScriptPath];
 });

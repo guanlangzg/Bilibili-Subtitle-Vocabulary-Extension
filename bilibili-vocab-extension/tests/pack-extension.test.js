@@ -44,7 +44,7 @@ function createWorkspace() {
         action: { default_popup: 'dist/popup.html' },
         web_accessible_resources: [
           {
-            resources: ['data/*.json', 'dist/overlay.js'],
+            resources: ['dist/overlay.js'],
             matches: ['https://*/*'],
           },
         ],
@@ -155,8 +155,8 @@ test('pack extension: collectPackEntries should follow manifest and html runtime
       'dist/assets/study-preview.css',
       'dist/popup.html',
       'dist/assets/popup.js',
-      'data',
       'dist/overlay.js',
+      'data',
       'sharedSettings.js',
       'runtimeMessaging.js',
       'learningState.js',

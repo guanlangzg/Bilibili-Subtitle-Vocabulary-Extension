@@ -837,13 +837,6 @@
 
     await globalScope.VocabularyModule.loadVocabulary();
 
-    if (
-      globalScope.ChineseSegmenter &&
-      typeof globalScope.ChineseSegmenter.segment === 'function'
-    ) {
-      globalScope.ChineseSegmenter.segment(sourceText);
-    }
-
     const normalizedSettings = normalizeSettings(settings);
     const matches = globalScope.VocabularyModule.findMatchesInText(
       sourceText,

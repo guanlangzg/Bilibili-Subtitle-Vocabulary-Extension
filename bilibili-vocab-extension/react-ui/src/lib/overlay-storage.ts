@@ -1,8 +1,13 @@
 import { SETTINGS_STORAGE_KEY_V3, migrateToV3, normalizeSettingsV3 } from './overlay-settings';
 import type { SettingsV3 } from './overlay-settings';
 import { MESSAGE_TYPES, sendRuntimeMessage } from './runtime-messaging';
+import { readStorage, writeStorage } from './chrome-storage-adapter';
+
+// Shared facade with the popup/options storage module.
+export { readStorage, writeStorage };
 
 const LEARNING_SUMMARY_STORAGE_KEY = 'bili_vocab_learning_summary_v1';
+const STORAGE_MUTATION_TIMEOUT_MS = 10000;
 
 export interface LearningSummary {
   todayCount: number;
@@ -11,29 +16,53 @@ export interface LearningSummary {
   recentWords: Array<{ word: string; translation?: string; status?: string }>;
 }
 
-function hasChromeStorage(): boolean {
-  return typeof chrome !== 'undefined' && Boolean(chrome.storage) && Boolean(chrome.storage.local);
+function createStorageMutationTimeoutError(): Error {
+  return new Error(`Storage mutation timed out after ${STORAGE_MUTATION_TIMEOUT_MS}ms`);
 }
 
-function getChromeRuntimeError(fallbackMessage: string): Error | null {
-  if (typeof chrome === 'undefined' || !chrome.runtime) {
-    return null;
-  }
-  const runtimeError = chrome.runtime.lastError;
-  if (!runtimeError) {
-    return null;
-  }
-  const message =
-    typeof runtimeError.message === 'string' && runtimeError.message.trim()
-      ? runtimeError.message.trim()
-      : fallbackMessage;
-  return new Error(message);
+// Matches the popup/options storage queue semantics so both entries share the
+// same timeout protection against hung chrome.storage mutations.
+function runStorageMutationWithTimeout<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const timeoutId = setTimeout(() => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      reject(createStorageMutationTimeoutError());
+    }, STORAGE_MUTATION_TIMEOUT_MS);
+
+    Promise.resolve()
+      .then(task)
+      .then(
+        (result) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutId);
+          resolve(result);
+        },
+        (error) => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          clearTimeout(timeoutId);
+          reject(error);
+        }
+      );
+  });
 }
 
 let storageMutationQueue = Promise.resolve();
 
 function enqueueStorageMutation<T>(task: () => Promise<T>): Promise<T> {
-  const nextTask = storageMutationQueue.then(task, task);
+  const nextTask = storageMutationQueue.then(
+    () => runStorageMutationWithTimeout(task),
+    () => runStorageMutationWithTimeout(task)
+  );
   storageMutationQueue = nextTask.then(
     () => undefined,
     () => undefined
@@ -71,40 +100,6 @@ function normalizeLearningSummary(value: unknown): LearningSummary {
     masteredCount: toPositiveInt(source.masteredCount),
     recentWords: recentWords.slice(0, 5),
   };
-}
-
-export async function readStorage<T extends Record<string, unknown>>(
-  keys?: string[] | null
-): Promise<T> {
-  if (!hasChromeStorage()) {
-    return {} as T;
-  }
-  return new Promise<T>((resolve, reject) => {
-    chrome.storage.local.get(keys || null, (payload) => {
-      const runtimeError = getChromeRuntimeError('chrome.storage.local.get failed');
-      if (runtimeError) {
-        reject(runtimeError);
-        return;
-      }
-      resolve((payload || {}) as T);
-    });
-  });
-}
-
-export async function writeStorage(payload: Record<string, unknown>): Promise<void> {
-  if (!hasChromeStorage()) {
-    return;
-  }
-  await new Promise<void>((resolve, reject) => {
-    chrome.storage.local.set(payload, () => {
-      const runtimeError = getChromeRuntimeError('chrome.storage.local.set failed');
-      if (runtimeError) {
-        reject(runtimeError);
-        return;
-      }
-      resolve();
-    });
-  });
 }
 
 export async function loadOverlaySettingsV3(): Promise<SettingsV3> {

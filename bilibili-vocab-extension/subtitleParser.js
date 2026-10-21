@@ -185,22 +185,6 @@
     return isHostOrSubdomain(hostname, 'bilibili.com') || isHostOrSubdomain(hostname, 'hdslb.com');
   }
 
-  function isTencentHost(hostname) {
-    return isHostOrSubdomain(hostname, 'v.qq.com');
-  }
-
-  function isIqiyiHost(hostname) {
-    return isHostOrSubdomain(hostname, 'iqiyi.com');
-  }
-
-  function isNetflixHost(hostname) {
-    return isHostOrSubdomain(hostname, 'netflix.com');
-  }
-
-  function isYoukuHost(hostname) {
-    return isHostOrSubdomain(hostname, 'youku.com');
-  }
-
   function isElementVisible(element) {
     if (!(element instanceof HTMLElement)) {
       return false;
@@ -310,6 +294,18 @@
     return childNodes.some((child) => containsRenderedWordNode(child));
   }
 
+  // Subtitle nodes are reused across cues: when the site rewrites a node we already rendered into,
+  // the stored original describes the previous cue and must not win over the current DOM text.
+  function hasRenderedTextDrifted(element) {
+    const renderedSnapshot = normalizeText(
+      element.dataset && element.dataset.biliVocabRenderedText
+    );
+    if (!renderedSnapshot) {
+      return false;
+    }
+    return renderedSnapshot !== normalizeText(element.textContent);
+  }
+
   function extractSubtitleText(element) {
     if (!(element instanceof HTMLElement)) {
       return '';
@@ -317,7 +313,11 @@
 
     const originalText = normalizeText(element.dataset && element.dataset.biliVocabOriginalText);
     if (originalText) {
-      return originalText;
+      if (!hasRenderedTextDrifted(element)) {
+        return originalText;
+      }
+      delete element.dataset.biliVocabOriginalText;
+      delete element.dataset.biliVocabRenderedText;
     }
 
     if (containsRenderedWordNode(element)) {
@@ -569,11 +569,11 @@
       });
     }
 
-    elements.sort((left, right) => {
-      return subtitleElementScore(left, playerRect) - subtitleElementScore(right, playerRect);
-    });
-
-    return elements;
+    // Score once per element: reading layout inside the comparator costs O(n log n) reflows.
+    return elements
+      .map((element) => ({ element, score: subtitleElementScore(element, playerRect) }))
+      .sort((left, right) => left.score - right.score)
+      .map((item) => item.element);
   }
 
   function getPrimarySubtitleElement() {
@@ -598,23 +598,47 @@
     }
   }
 
+  // Bilibili emits track languages such as zh-Hans / zh-CN / zh-Hant / ai-zh; every Chinese track
+  // must outrank non-Chinese ones, otherwise an English track wins when the exact code is absent.
+  function getSubtitleTrackRank(lan) {
+    const normalized = String(lan || '').trim();
+    switch (normalized) {
+      case 'zh-Hans':
+        return 0;
+      case 'zh-CN':
+        return 1;
+      case 'zh':
+        return 2;
+      case 'ai-zh':
+        return 4;
+      case 'en-US':
+        return 5;
+      case 'en':
+        return 6;
+      default:
+        break;
+    }
+
+    const lowered = normalized.toLowerCase();
+    if (lowered.startsWith('ai-zh')) {
+      return 4;
+    }
+    if (lowered === 'zh' || lowered.startsWith('zh-') || lowered.endsWith('-zh')) {
+      return 3;
+    }
+    return 10;
+  }
+
   function pickPreferredSubtitleTrack(subtitles) {
     if (!Array.isArray(subtitles) || subtitles.length === 0) {
       return null;
     }
 
-    const priorities = ['zh-Hans', 'zh-CN', 'zh', 'en-US', 'en'];
     const sorted = subtitles
       .filter((item) => item && typeof item === 'object')
       .slice()
       .sort((left, right) => {
-        const leftLan = String(left.lan || '').trim();
-        const rightLan = String(right.lan || '').trim();
-        const leftPriority = priorities.indexOf(leftLan);
-        const rightPriority = priorities.indexOf(rightLan);
-        const normalizedLeft = leftPriority < 0 ? priorities.length + 1 : leftPriority;
-        const normalizedRight = rightPriority < 0 ? priorities.length + 1 : rightPriority;
-        return normalizedLeft - normalizedRight;
+        return getSubtitleTrackRank(left.lan) - getSubtitleTrackRank(right.lan);
       });
 
     return sorted[0] || null;
@@ -720,7 +744,8 @@
       return source;
     }
 
-    const sourceKey = source.bvid ? `bvid:${source.bvid}` : `aid:${source.aid}`;
+    const pageNumber = getCurrentPageNumber();
+    const sourceKey = `${source.bvid ? `bvid:${source.bvid}` : `aid:${source.aid}`}:p:${pageNumber}`;
     if (sourceKey === resolvedIdentifierCacheKey && resolvedIdentifierCacheValue) {
       return resolvedIdentifierCacheValue;
     }
@@ -732,7 +757,7 @@
 
     const payload = await response.json();
     const data = (payload && payload.data) || {};
-    const cid = pickPageCid(data.pages, getCurrentPageNumber());
+    const cid = pickPageCid(data.pages, pageNumber);
     const resolved = {
       aid: source.aid || Number(data.aid || 0) || 0,
       bvid: source.bvid || String(data.bvid || '').trim(),
@@ -810,7 +835,8 @@
     const requestPromise = (async () => {
       const response = await fetch(buildPlayerApiUrl(identifiers), { credentials: 'include' });
       if (!response.ok) {
-        return [];
+        // Transient player API failures should stay retryable.
+        throw new Error(`Subtitle player API failed with status ${response.status}`);
       }
 
       const payload = await response.json();
@@ -827,7 +853,7 @@
 
       const subtitleResponse = await fetch(subtitleUrl, { credentials: 'omit' });
       if (!subtitleResponse.ok) {
-        return [];
+        throw new Error(`Subtitle track fetch failed with status ${subtitleResponse.status}`);
       }
 
       const subtitlePayload = await subtitleResponse.json();
@@ -861,9 +887,9 @@
           console.error('[BiliVocab] Subtitle timeline load failed:', error);
         }
         if (subtitleTimelineCacheKey === cacheKey) {
+          // Keep loaded=false so the same video key can retry later.
           subtitleTimeline = [];
-          subtitleTimelineLoaded = true;
-          return subtitleTimeline;
+          subtitleTimelineLoaded = false;
         }
 
         return [];

@@ -47,6 +47,7 @@ interface UseV3SettingsResult {
   setStatus: (message: string) => void;
   setWorkingDirect: (next: SettingsV3) => void;
   mutateWorking: (updater: (draft: SettingsV3) => SettingsV3) => void;
+  commit: (next: SettingsV3, message?: string) => Promise<SettingsSaveResult | null>;
   save: (message?: string) => Promise<SettingsSaveResult | null>;
   reset: (message?: string) => void;
   reload: () => void;
@@ -94,14 +95,6 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
   const [reloadNonce, setReloadNonce] = useState(0);
   const dirtyRef = useRef(false);
   const workingRef = useRef<SettingsV3 | null>(null);
-  const savedRef = useRef<SettingsV3 | null>(null);
-
-  // Track dirty state incrementally instead of comparing full JSON on every render.
-  const recomputeDirty = useCallback(() => {
-    const s = savedRef.current;
-    const w = workingRef.current;
-    dirtyRef.current = Boolean(s && w) && JSON.stringify(s) !== JSON.stringify(w);
-  }, []);
 
   const dirty = useMemo(() => {
     if (!saved || !working) {
@@ -136,17 +129,17 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
     setStatusCode(next.code);
   }
 
-  function setStatusText(message: string) {
+  // Stable identity: data hooks include setStatus in their effect deps, so a
+  // per-render function here would restart their read loops on every render.
+  const setStatusText = useCallback((message: string) => {
     setStatus(message);
     setStatusCode('');
     setFeedback(null);
-  }
+  }, []);
 
   function setWorkingState(next: SettingsV3 | null) {
     workingRef.current = next;
     setWorking(next);
-    // Sync savedRef so dirty computation always compares against latest saved.
-    savedRef.current = savedRef.current;
   }
 
   function detectConflictScopes(local: SettingsV3 | null, remote: SettingsV3): string[] {
@@ -198,7 +191,6 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
           return;
         }
         setSaved(payload);
-        savedRef.current = payload;
         setWorkingState(payload);
         setLoading(false);
         setConflict(null);
@@ -279,8 +271,8 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
     });
   }, []);
 
-  const save = useCallback(async (message = '配置已保存并应用到扩展。') => {
-    const requestedSnapshot = workingRef.current ? cloneSettingsV3(workingRef.current) : null;
+  const persistSettings = useCallback(async (snapshot: SettingsV3, message: string) => {
+    const requestedSnapshot = cloneSettingsV3(snapshot);
     if (!requestedSnapshot) {
       return null;
     }
@@ -299,7 +291,6 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
         workingRef.current
       );
       setSaved(reconciliation.saved);
-      savedRef.current = reconciliation.saved;
       setWorkingState(reconciliation.working);
       setConflict(null);
       setSaving(false);
@@ -328,6 +319,26 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
       return null;
     }
   }, []);
+
+  const commit = useCallback(
+    async (next: SettingsV3, message = '更改已保存。') => {
+      const snapshot = normalizeSettingsV3(next);
+      setWorkingState(snapshot);
+      return persistSettings(snapshot, message);
+    },
+    [persistSettings]
+  );
+
+  const save = useCallback(
+    async (message = '配置已保存并应用到扩展。') => {
+      const requestedSnapshot = workingRef.current ? cloneSettingsV3(workingRef.current) : null;
+      if (!requestedSnapshot) {
+        return null;
+      }
+      return persistSettings(requestedSnapshot, message);
+    },
+    [persistSettings]
+  );
 
   const reset = useCallback(
     (message = '已撤销未保存修改。') => {
@@ -432,6 +443,7 @@ export function useV3Settings(options: UseV3SettingsOptions = {}): UseV3Settings
     setStatus: setStatusText,
     setWorkingDirect,
     mutateWorking,
+    commit,
     save,
     reset,
     reload: () => setReloadNonce((previous) => previous + 1),

@@ -461,8 +461,29 @@
     initialized = true;
   }
 
+  function destroy() {
+    if (!initialized) {
+      return;
+    }
+
+    document.removeEventListener('mouseover', handleMouseOver, true);
+    document.removeEventListener('mouseout', handleMouseOut, true);
+    document.removeEventListener('focusin', handleFocusIn, true);
+    document.removeEventListener('focusout', handleFocusOut, true);
+    document.removeEventListener('click', handleDocumentClick, true);
+    document.removeEventListener('keydown', handleEscape);
+    window.removeEventListener('resize', hideTooltip);
+    initialized = false;
+    activeWordElement = null;
+    if (tooltipElement && tooltipElement.parentNode) {
+      tooltipElement.parentNode.removeChild(tooltipElement);
+    }
+    tooltipElement = null;
+  }
+
   const api = {
     init,
+    destroy,
     hideTooltip,
     renderTooltipContent,
     getLearningStatusLabel,

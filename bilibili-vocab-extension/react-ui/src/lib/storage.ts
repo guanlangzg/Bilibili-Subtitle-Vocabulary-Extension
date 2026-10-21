@@ -41,13 +41,12 @@ const ACTIVE_TAB_SUBTITLE_NAVIGATION_SUBSCRIBE =
   'BILI_VOCAB_ACTIVE_TAB_SUBTITLE_NAVIGATION_SUBSCRIBE';
 export const CONTENT_RUNTIME_SCRIPT_FILES = [
   'config.js',
-  'settingsUiStateMachine.js',
+  'runtimeMessaging.js',
   'sharedSettings.js',
   'experienceMetrics.js',
   'adaptiveTuning.js',
   'learningState.js',
   'utils.js',
-  'segmenter.js',
   'vocabulary-pure.js',
   'vocabulary.js',
   'translator.js',
@@ -864,11 +863,6 @@ function normalizeLearningSummary(input: unknown): LearningSummary {
   };
 }
 
-export async function readLearningSummary(): Promise<LearningSummary> {
-  const payload = await readStorage<Record<string, unknown>>([LEARNING_SUMMARY_STORAGE_KEY]);
-  return normalizeLearningSummary(payload[LEARNING_SUMMARY_STORAGE_KEY]);
-}
-
 function getLearningStateApi(): LearningStateApi | null {
   const scopedGlobal = globalThis as typeof globalThis & { LearningState?: LearningStateApi };
   return scopedGlobal.LearningState || null;
@@ -1165,11 +1159,6 @@ export async function readEncounteredWordRanking(
 
   const safeLimit = Math.max(1, Math.floor(Number(limit) || 6));
   return sortEncounteredWords(items, sortMode).slice(0, safeLimit);
-}
-
-export async function getCurrentTabHostname(): Promise<string> {
-  const activeTab = await queryActiveTab().catch(() => null);
-  return resolveHostnameFromTabUrl(activeTab && activeTab.url);
 }
 
 function resolveActiveTabOriginPattern(rawUrl: unknown): {
@@ -1552,10 +1541,6 @@ export async function readActiveTabSubtitleStatus(): Promise<ActiveTabSubtitleSt
   }
 }
 
-export async function readActiveTabSubtitleNavigation(): Promise<ActiveTabSubtitleNavigation> {
-  return (await readActiveTabSubtitleStatus()).subtitleNavigation;
-}
-
 export async function navigateActiveTabSubtitle(
   action: ActiveTabSubtitleNavigationAction
 ): Promise<ActiveTabSubtitleNavigation> {
@@ -1801,6 +1786,18 @@ export async function exportVocabularyBook(
 }
 
 export async function clearVocabularyBook(): Promise<number> {
+  // Single-writer path: the background queue owns the shared learning keys, so
+  // route the clear through it to avoid racing concurrent hits/reviews.
+  try {
+    const payload = await sendRuntimeMessage<{ cleared?: number }>(
+      MESSAGE_TYPES.LEARNING_CLEAR_VOCABULARY,
+      {}
+    );
+    return Math.max(0, Math.floor(Number(payload && payload.cleared) || 0));
+  } catch {
+    // Background unavailable; fall back to the direct storage write below.
+  }
+
   return enqueueStorageMutation(async () => {
     const learningState = getLearningStateApi();
     const payload = await readStorage<Record<string, unknown>>([
@@ -1831,6 +1828,8 @@ export async function clearVocabularyBook(): Promise<number> {
       const nextRecord: Record<string, unknown> = {
         ...(record as Record<string, unknown>),
         status: 'seen',
+        // deriveStatus re-promotes any record with saveCount > 0, so reset it here as well.
+        saveCount: 0,
       };
       delete nextRecord.savedAt;
       nextWordStats[wordKey] = nextRecord;
@@ -2005,27 +2004,6 @@ export function subscribeLearningStreak(onUpdate: (streak: LearningStreak) => vo
   };
 }
 
-export function subscribeLearningSummary(onUpdate: (summary: LearningSummary) => void): () => void {
-  if (
-    typeof chrome === 'undefined' ||
-    !chrome.storage ||
-    !chrome.storage.onChanged ||
-    typeof chrome.storage.onChanged.addListener !== 'function'
-  ) {
-    return () => {};
-  }
-  const listener = (changes: Record<string, chrome.storage.StorageChange>, areaName: string) => {
-    if (areaName !== 'local' || !changes[LEARNING_SUMMARY_STORAGE_KEY]) {
-      return;
-    }
-    onUpdate(normalizeLearningSummary(changes[LEARNING_SUMMARY_STORAGE_KEY].newValue));
-  };
-  chrome.storage.onChanged.addListener(listener);
-  return () => {
-    chrome.storage.onChanged.removeListener(listener);
-  };
-}
-
 function subscribeStorageKeys(keys: string[], onUpdate: () => void): () => void {
   if (
     typeof chrome === 'undefined' ||
@@ -2062,10 +2040,6 @@ export function subscribeQuickReviewSource(onUpdate: () => void): () => void {
     ],
     onUpdate
   );
-}
-
-export function subscribeEncounteredWordStats(onUpdate: () => void): () => void {
-  return subscribeStorageKeys([WORD_STATS_STORAGE_KEY, LEARNING_WORD_STATS_STORAGE_KEY], onUpdate);
 }
 
 export async function openOptionsPage(): Promise<void> {

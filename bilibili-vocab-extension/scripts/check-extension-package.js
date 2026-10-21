@@ -40,20 +40,7 @@ const FORBIDDEN_PACKAGE_ENTRIES = [
 ];
 const ROOT_RUNTIME_ENTRY_EXTENSIONS = ['.js', '.css'];
 
-function toKb(bytes) {
-  return Number((bytes / 1024).toFixed(2));
-}
-
-function toRoundedKb(value) {
-  return Number(Number(value).toFixed(2));
-}
-
-function parseBudget(rawValue, fallback) {
-  if (rawValue == null || rawValue === '') {
-    return fallback;
-  }
-  return Number(rawValue);
-}
+const { parseBudget, toKb, toRoundedKb } = require('./lib/size-budget-utils.js');
 
 function assertPositivePackageBudgets(maxZipSizeKb, maxUnpackedSizeKb, maxEntryCount) {
   if (!Number.isFinite(maxZipSizeKb) || maxZipSizeKb <= 0) {

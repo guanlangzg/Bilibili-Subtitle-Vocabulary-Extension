@@ -1,7 +1,6 @@
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import '../styles/ui.css';
-import { LearningStreak } from '../lib/learning-client';
 import { clearVocabularyBook } from '../lib/vocabulary-export';
 import {
   BUILTIN_PROFILE_IDS,
@@ -45,17 +44,13 @@ import { SaveIcon, UndoIcon } from './icons';
 
 type SectionKey = 'basic' | 'learning' | 'sites' | 'display' | 'data';
 
-const SECTION_META: Array<{ id: SectionKey; name: string; description: string }> = [
-  { id: 'basic', name: '基础设置', description: '配置档、全局开关和状态摘要' },
-  { id: 'learning', name: '学习策略', description: '替换强度、词库和复习节奏' },
-  { id: 'sites', name: '站点管理', description: '域名规则和授权说明' },
-  { id: 'display', name: '显示与交互', description: '主题、悬浮面板和快捷键' },
-  { id: 'data', name: '数据与备份', description: '导入导出、恢复默认和清理' },
+const SECTION_META: Array<{ id: SectionKey; name: string; description: string; icon: string }> = [
+  { id: 'basic', name: '基础设置', description: '配置档、全局开关和状态摘要', icon: '⌘' },
+  { id: 'learning', name: '学习策略', description: '替换强度、词库和复习节奏', icon: '◎' },
+  { id: 'sites', name: '站点管理', description: '域名规则和授权说明', icon: '⌁' },
+  { id: 'display', name: '显示与交互', description: '主题、悬浮面板和快捷键', icon: '◐' },
+  { id: 'data', name: '数据与备份', description: '导入导出、恢复默认和清理', icon: '□' },
 ];
-
-function formatLearningStreakStatus(streak: LearningStreak): string {
-  return streak.currentStreak > 0 ? `${streak.currentStreak} 天` : '未开始';
-}
 
 function downloadTextFile(content: string, filename: string, mimeType: string) {
   const blob = new Blob([content], { type: mimeType });
@@ -400,9 +395,11 @@ function OptionsApp() {
       <main className="settings-shell">
         <aside className="settings-sidebar stagger-enter">
           <div className="settings-brand">
-            <span className="studio-eyebrow">Settings</span>
-            <h1>字幕学习设置</h1>
-            <p>按任务分类管理扩展行为。</p>
+            <span className="popup-brand__mark">SV</span>
+            <div>
+              <h1>字幕学习设置</h1>
+              <p>按任务分类管理扩展行为。</p>
+            </div>
           </div>
           <nav className="settings-nav" role="tablist" aria-label="设置分类">
             {SECTION_META.map((item) => (
@@ -419,65 +416,47 @@ function OptionsApp() {
                   window.scrollTo({ top: 0, behavior: 'smooth' });
                 }}
               >
+                <span className="settings-nav__icon" aria-hidden="true">
+                  {item.icon}
+                </span>
                 <strong>{item.name}</strong>
-                <span>{item.description}</span>
               </button>
             ))}
           </nav>
         </aside>
 
         <section className="settings-main">
-          <section className="studio-hero settings-hero stagger-enter">
-            <div className="inline wrap">
-              <div>
-                <span className="studio-eyebrow">{currentSection.name}</span>
-                <h2 className="studio-title">{currentSection.description}</h2>
-                <p className="studio-subtitle">
-                  当前配置档：{activeProfileName} · {dirty ? '有未保存修改' : '已同步'}
-                </p>
-              </div>
-              <div className="btn-row">
-                <button
-                  type="button"
-                  className="btn ghost"
-                  onClick={onReset}
-                  disabled={!dirty || saving}
-                >
-                  <UndoIcon size={14} />
-                  撤销修改
-                </button>
-                <button
-                  type="button"
-                  className="btn primary"
-                  onClick={onSave}
-                  disabled={!dirty || saving}
-                  aria-busy={saving}
-                  data-dirty={dirty || undefined}
-                >
-                  <SaveIcon size={14} />
-                  {saving ? '保存中...' : '保存配置'}
-                </button>
-              </div>
+          <header className="settings-toolbar">
+            <div>
+              <span className="studio-eyebrow">{currentSection.name}</span>
+              <h2>{currentSection.description}</h2>
+              <p>
+                当前配置档：{activeProfileName} · {dirty ? '有未保存修改' : '已同步'}
+              </p>
             </div>
-            <div className="studio-status-row">
-              <span className={`status-pill ${dirty ? 'warn' : 'good'}`}>
-                <strong>{dirty ? '未保存' : '已同步'}</strong>
-                {dirty ? '待提交修改' : '当前状态已生效'}
-              </span>
-              <span className="status-pill">
-                <strong>站点规则</strong>
-                {siteRules.length} 条
-              </span>
-              <span className="status-pill">
-                <strong>自动调优</strong>
-                {adaptiveState ? (adaptiveState.enabled ? '运行中' : '已关闭') : '读取中'}
-              </span>
-              <span className="status-pill">
-                <strong>连续学习</strong>
-                {formatLearningStreakStatus(learningStreak)}
-              </span>
+            <div className="btn-row">
+              <button
+                type="button"
+                className="btn ghost"
+                onClick={onReset}
+                disabled={!dirty || saving}
+              >
+                <UndoIcon size={14} />
+                撤销修改
+              </button>
+              <button
+                type="button"
+                className="btn primary"
+                onClick={onSave}
+                disabled={!dirty || saving}
+                aria-busy={saving}
+                data-dirty={dirty || undefined}
+              >
+                <SaveIcon size={14} />
+                {saving ? '保存中...' : '保存更改'}
+              </button>
             </div>
-          </section>
+          </header>
 
           <section
             className="save-bar stagger-enter"
@@ -536,7 +515,7 @@ function OptionsApp() {
           )}
 
           <section
-            className="settings-content panel-grid"
+            className="settings-content"
             role="tabpanel"
             id={`settings-panel-${section}`}
             aria-labelledby={`settings-tab-${section}`}
