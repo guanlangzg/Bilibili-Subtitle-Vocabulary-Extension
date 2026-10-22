@@ -11,7 +11,7 @@ export function getChromeRuntimeError(fallbackMessage: string): Error | null {
 
 export function readStorage<T extends Record<string, unknown>>(keys?: string[] | null): Promise<T> {
   if (!hasChromeStorage()) {
-    return Promise.resolve({} as T);
+    return Promise.reject(new Error('chrome.storage.local unavailable'));
   }
   return new Promise<T>((resolve, reject) => {
     chrome.storage.local.get(keys || null, (payload) => {
@@ -27,7 +27,7 @@ export function readStorage<T extends Record<string, unknown>>(keys?: string[] |
 
 export function writeStorage(payload: Record<string, unknown>): Promise<void> {
   if (!hasChromeStorage()) {
-    return Promise.resolve();
+    return Promise.reject(new Error('chrome.storage.local unavailable'));
   }
   return new Promise<void>((resolve, reject) => {
     chrome.storage.local.set(payload, () => {

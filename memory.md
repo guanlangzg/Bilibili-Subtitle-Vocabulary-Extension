@@ -190,3 +190,44 @@ CEDICT 用 `/` 分义项、用 `;` 分同一义项的不同说法:`电影 → /m
 - core 覆盖率:CET4 51.5% / CET6 44.5% / KAOYAN 53.6%
 - 发布包 core 模式从"零替换"变为正常替换(实测 5/5 句)
 - 门禁:test 464 / test:ui 56 / lint / typecheck / build(overlay 270.83KB) / 包体(13660KB unpacked, 2566.7KB zip)全绿
+
+## 2026-10-21 插件与安卓学习数据对齐
+
+- **跨端验证不能只比字段名**：同一份 JSON fixture 必须由真实 JS 与 Kotlin 解析、归并，再对比结构化 bundle/progress。Kotlin `kotlinx.serialization` 默认接受 quoted numeric，却拒绝 `3.0`/指数形式的整数；协议入口需先拒绝字符串数字，并规范化合法整数。`5.0` 与 `5` 按数值比较，不能拿原始 JSON 文本作跨端内容指纹。
+- **单词身份前置规范必须固定**：Kotlin 默认 `trim()` 与 ECMAScript 不完全一致（FEFF、001C）。共同层使用固定 ECMAScript 空白集合，保留 Unicode 默认小写；测试需包括 FEFF/全角空格/001C/0085/İ/词尾 Sigma，再验证 Java UUID.nameUUIDFromBytes 的无 namespace MD5 v3。原 App 的旧卡 ID 不随协议迁移重写。
+- **旧基线未知标记不能覆盖明确行为**：App 历史没有收藏信息，baseline `saved=false` 表示没有可确认的收藏事实，不代表一次 unsave。基线 true 仅作初始值，明确事件始终优先。迁移时间不可当作收藏发生时间。历史复习日志可转事件；聚合基线只保留残差，防止二次计数。
+- **调度快照与事实要区分**：插件旧间隔算法与 App java-fsrs 1.0.0 默认参数、fuzz、时间取整不同；共同层保留算法/版本和真实快照，不从 masteryScore/easeFactor 伪造 FSRS 参数。App 原队列仍按词书，协议对齐不等于界面已共用调度；具体边界见 `docs/学习数据互通协议.md`。
+- **无 Android SDK 的轻量验证方法**：便携 JRE 17 + Kotlin compiler-embeddable 2.0.0 + serialization 插件，可直接编译纯模型并跑 JUnit；再用官方 Room/AAR、coroutines、FSRS、Android API jar 做 core model/common/scheduler/domain/database 类型检查，不需要安装系统 PATH。不覆盖 KSP/Hilt 生成、Robolectric 或设备测试，不得冒充完整 Android build。
+- **Room schema 核验**：App `scripts/test/verify-learning-schema.py` 重算历史及新增 schema 的 identityHash，并实际执行 migration 比较表、索引、视图和旧数据；Room 2.6.1 的 SchemaIdentityKey 分隔符是 `?:?`，不是换行，也不能直接哈希 createSql。官方 SchemaBundle/SchemaIdentityKey 与历史 hash 可交叉核验，仍应补 KSP 导出及设备迁移验证。
+- **浏览器隔离验证**：临时页加载真实 runtime 脚本，仅 storage 使用隔离适配器；开发期间浏览器可能缓存旧 MESSAGE_TYPES，新增消息无响应时先核实加载脚本版本。主动 click/Enter 记 lookup，hover 不记。临时页与直接消息测试不等同真实已安装扩展端到端测试。
+
+## 2026-10-22 插件服务器同步接入与星愿浏览器实测
+
+### 实现位置
+- `bilibili-vocab-extension/learningDataSync.js`：纯协议/校验（URL、令牌、设置归一、pull→bundle、错误文案），可 Node 直测
+- `bilibili-vocab-extension/background-learning-sync.js`：网络请求、游标、先拉后推；在共享串行队列内执行
+- `react-ui/src/lib/sync-client.ts`、`sync-permission.ts`、`components/sync-section.tsx`：选项页“学习记录同步”面板
+- 新增消息 `SYNC_GET_SETTINGS`/`SYNC_SAVE_SETTINGS`/`SYNC_GET_STATUS`/`SYNC_RUN`；`runtimeMessaging.js` 与 `react-ui/src/lib/runtime-messaging.ts` 必须同步
+
+### 关键约束（踩过）
+- **令牌不做 trim**：先 trim 再校验会静默接受服务端会拒绝的令牌，必须对原值匹配 `^vsc_[A-Za-z0-9_-]{32,64}$`
+- **错误对象过不了消息边界**：`sendRuntimeMessage` 只保留 `message`，`error.status/body` 会丢；后台必须在抛错前把状态码和服务端 message 拼进 `Error.message`，否则 UI 只显示 “HTTP 401”
+- **同步必须先拉后推**：先 import 远端事实再 push 合并结果；游标只在导入成功后前进
+- **主机权限需用户手势**：`chrome.permissions.request` 必须在点击回调里调用；Playwright 无法应答该弹窗，测试用预授权扩展副本（往 manifest 加 host_permissions）
+- **测试副本必须复用 `collectManifestPackEntries`**（`scripts/pack-extension.js`）：手写复制只拿 manifest 入口会漏 `background-settings.js` 等 importScripts 依赖，表现为后台 `Background modules not loaded`
+
+### 星愿浏览器（Twinkstar）实测
+- 可执行文件：`D:/Program Files/Twinkstar Browser/twinkstar.exe`，基于 Chromium，支持 `--load-extension`/`--disable-extensions-except` 与 Playwright `launchPersistentContext`
+- 实测入口：`node tests/sync-e2e-browser.js`，需 `SYNC_E2E_SERVER`、`SYNC_E2E_TOKEN`，可选 `SYNC_E2E_OUT`
+- 通过项：选项页配置保存并持久化、服务器状态查询、首次同步（上传 1 事件）、二次同步幂等（游标不变、duplicates=1）、错误令牌显示“服务器返回 401：Missing or invalid token”、另一设备推送 android 事件后本地拉取并保留 `source`
+- 选项页导航项是 `role="tab"` 不是 button，`getByRole('button', {name:/学习记录同步/})` 会超时
+
+### 环境坑
+- 用 Python 改写仓库文件会写回 CRLF，触发 prettier 数千个 `Delete ␍`；改完必须 `read_bytes().replace(CRLF, LF)`（用二进制读写，避免文本模式自动转换） 或改用 Edit 工具
+- TypeScript 注释里出现 `*://*/*` 会被当成块注释结束符，注释中不要写该字面量
+- `page.evaluate` 里不能用 Playwright 的 `text=` 选择器语法；`page.waitForFunction` 只能用 DOM API
+
+### 验证结果
+- lint / typecheck 通过；test 551/551；test:ui 56/56；build:extension 通过（overlay 270.92KB / 65.22KB gzip）
+- 同步单测 `tests/learning-data-sync.test.js` 10/10
+- 星愿浏览器完整 E2E 两轮（含一次干净账号）全部通过

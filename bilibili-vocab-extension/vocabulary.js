@@ -132,6 +132,15 @@
     });
   }
 
+  function createEventId() {
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID();
+    }
+    // Opaque retry-stable fallback for contexts without Web Crypto.
+    return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   function enqueueLearningHitOutbox(entry) {
     learningHitOutbox.push(entry);
     while (learningHitOutbox.length > LEARNING_HIT_OUTBOX_LIMIT) {
@@ -166,11 +175,12 @@
     return learningHitOutboxFlushPromise;
   }
 
-  function persistLearningHit(record, payload, now) {
+  function persistLearningHit(record, payload, now, eventId) {
     const messagePayload = {
       ...payload,
       record,
       now,
+      eventId,
     };
     return sendRuntimeMessage('BILI_VOCAB_LEARNING_RECORD_HIT', messagePayload)
       .then((result) => {
@@ -179,16 +189,19 @@
       })
       .catch((error) => {
         logError('Vocabulary hit background persist failed', error);
+        // The outbox entry keeps the original eventId so a retry is deduplicated
+        // by the background instead of counting the exposure twice.
         enqueueLearningHitOutbox(messagePayload);
         return null;
       });
   }
 
-  function persistLearningReviewFeedback(word, action, now) {
+  function persistLearningReviewFeedback(word, action, now, eventId) {
     return sendRuntimeMessage('BILI_VOCAB_LEARNING_APPLY_REVIEW_FEEDBACK', {
       word,
       action,
       now,
+      eventId,
     });
   }
 
@@ -865,7 +878,7 @@
       updateActiveLearningRecord(key, wordIndex.get(key));
       reviewQueue = learningState.syncReviewQueue(reviewQueue, nextRecord, now);
       refreshLearningSummary(activeLearningRecords);
-      void persistLearningHit(previousRecord, exposurePayload, now);
+      void persistLearningHit(previousRecord, exposurePayload, now, createEventId());
     } else {
       entry.hitCount = normalizeHitCount(entry.hitCount) + 1;
       entry.lastSeen = now;
@@ -966,7 +979,12 @@
         .toLowerCase();
       let committedPayload = null;
       try {
-        committedPayload = await persistLearningReviewFeedback(key, normalizedAction, now);
+        committedPayload = await persistLearningReviewFeedback(
+          key,
+          normalizedAction,
+          now,
+          createEventId()
+        );
       } catch (error) {
         logError('Vocabulary learning action write failed', error);
         return null;

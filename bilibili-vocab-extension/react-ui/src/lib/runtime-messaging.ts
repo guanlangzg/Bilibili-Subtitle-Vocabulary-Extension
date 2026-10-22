@@ -8,6 +8,13 @@ export const MESSAGE_TYPES = {
   LEARNING_SAVE_WORD: 'BILI_VOCAB_LEARNING_SAVE_WORD',
   LEARNING_REMOVE_WORD: 'BILI_VOCAB_LEARNING_REMOVE_WORD',
   LEARNING_CLEAR_VOCABULARY: 'BILI_VOCAB_LEARNING_CLEAR_VOCABULARY',
+  LEARNING_RECORD_LOOKUP: 'BILI_VOCAB_LEARNING_RECORD_LOOKUP',
+  LEARNING_EXPORT_DATA: 'BILI_VOCAB_LEARNING_EXPORT_DATA',
+  LEARNING_IMPORT_DATA: 'BILI_VOCAB_LEARNING_IMPORT_DATA',
+  SYNC_GET_SETTINGS: 'BILI_VOCAB_SYNC_GET_SETTINGS',
+  SYNC_SAVE_SETTINGS: 'BILI_VOCAB_SYNC_SAVE_SETTINGS',
+  SYNC_GET_STATUS: 'BILI_VOCAB_SYNC_GET_STATUS',
+  SYNC_RUN: 'BILI_VOCAB_SYNC_RUN',
 } as const;
 
 function getRuntimeError(): Error | null {
@@ -16,6 +23,15 @@ function getRuntimeError(): Error | null {
   }
   const message = String(chrome.runtime.lastError.message || '').trim();
   return new Error(message || 'chrome.runtime.sendMessage failed');
+}
+
+/** Whether a live background runtime can receive messages. */
+export function hasRuntimeMessaging(): boolean {
+  return (
+    typeof chrome !== 'undefined' &&
+    Boolean(chrome.runtime) &&
+    typeof chrome.runtime.sendMessage === 'function'
+  );
 }
 
 /**

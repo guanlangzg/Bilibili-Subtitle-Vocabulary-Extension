@@ -41,8 +41,9 @@ import {
   MaintenanceAction,
 } from './options-sections';
 import { SaveIcon, UndoIcon } from './icons';
+import { SyncSection } from './sync-section';
 
-type SectionKey = 'basic' | 'learning' | 'sites' | 'display' | 'data';
+type SectionKey = 'basic' | 'learning' | 'sites' | 'display' | 'data' | 'sync';
 
 const SECTION_META: Array<{ id: SectionKey; name: string; description: string; icon: string }> = [
   { id: 'basic', name: '基础设置', description: '配置档、全局开关和状态摘要', icon: '⌘' },
@@ -50,6 +51,7 @@ const SECTION_META: Array<{ id: SectionKey; name: string; description: string; i
   { id: 'sites', name: '站点管理', description: '域名规则和授权说明', icon: '⌁' },
   { id: 'display', name: '显示与交互', description: '主题、悬浮面板和快捷键', icon: '◐' },
   { id: 'data', name: '数据与备份', description: '导入导出、恢复默认和清理', icon: '□' },
+  { id: 'sync', name: '学习记录同步', description: '与安卓 App 共用的学习事实', icon: '⇄' },
 ];
 
 function downloadTextFile(content: string, filename: string, mimeType: string) {
@@ -572,6 +574,7 @@ function OptionsApp() {
                 setGlobalControls={setGlobalControls}
               />
             )}
+            {section === 'sync' && <SyncSection />}
             {section === 'data' && (
               <DataBackupSection
                 saving={saving}

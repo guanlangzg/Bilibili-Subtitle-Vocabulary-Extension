@@ -9,9 +9,13 @@
         'adaptiveTuning.js',
         'experienceMetrics.js',
         'learningState.js',
+        'learningData.js',
         'background-settings.js',
         'background-storage.js',
+        'background-learning-data.js',
         'background-learning-state.js',
+        'learningDataSync.js',
+        'background-learning-sync.js',
         'background-message-handler.js',
         'background-commands.js'
       );
@@ -30,6 +34,11 @@
       require('./sharedSettings.js');
       require('./background-settings.js');
       require('./background-storage.js');
+      require('./learningData.js');
+      require('./background-learning-data.js');
+      require('./background-learning-state.js');
+      require('./learningDataSync.js');
+      require('./background-learning-sync.js');
       require('./background-message-handler.js');
       require('./background-commands.js');
       modulesLoaded = true;
@@ -121,6 +130,19 @@
       typeof chrome.storage.local.get !== 'function'
     ) {
       return;
+    }
+
+    // Learning data migration joins the shared serial queue: it captures the
+    // legacy snapshot before the first mutation and persists its marker.
+    if (
+      backgroundMessageHandler &&
+      typeof backgroundMessageHandler.initializeLearningData === 'function'
+    ) {
+      backgroundMessageHandler.initializeLearningData().catch((error) => {
+        if (typeof logBackgroundError === 'function') {
+          logBackgroundError('Failed to initialize learning data', error);
+        }
+      });
     }
 
     chrome.storage.local.get(null, (storedSettings) => {

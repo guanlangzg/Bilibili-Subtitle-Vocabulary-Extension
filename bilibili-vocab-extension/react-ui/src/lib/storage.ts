@@ -18,7 +18,7 @@ import {
   sortEncounteredWords,
   sortQuickReviewItems,
 } from './learning-dashboard';
-import { MESSAGE_TYPES, sendRuntimeMessage } from './runtime-messaging';
+import { MESSAGE_TYPES, hasRuntimeMessaging, sendRuntimeMessage } from './runtime-messaging';
 
 // Legacy storage keys retained for backward compatibility with existing installs.
 const WORD_STATS_STORAGE_KEY = 'bili_vocab_word_stats_v1';
@@ -46,6 +46,7 @@ export const CONTENT_RUNTIME_SCRIPT_FILES = [
   'experienceMetrics.js',
   'adaptiveTuning.js',
   'learningState.js',
+  'learningData.js',
   'utils.js',
   'vocabulary-pure.js',
   'vocabulary.js',
@@ -1788,16 +1789,16 @@ export async function exportVocabularyBook(
 export async function clearVocabularyBook(): Promise<number> {
   // Single-writer path: the background queue owns the shared learning keys, so
   // route the clear through it to avoid racing concurrent hits/reviews.
-  try {
+  if (hasRuntimeMessaging()) {
     const payload = await sendRuntimeMessage<{ cleared?: number }>(
       MESSAGE_TYPES.LEARNING_CLEAR_VOCABULARY,
       {}
     );
     return Math.max(0, Math.floor(Number(payload && payload.cleared) || 0));
-  } catch {
-    // Background unavailable; fall back to the direct storage write below.
   }
 
+  // Only contexts without a runtime bridge keep the legacy direct write; a
+  // failed live runtime must surface instead of dropping unsave events.
   return enqueueStorageMutation(async () => {
     const learningState = getLearningStateApi();
     const payload = await readStorage<Record<string, unknown>>([

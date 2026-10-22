@@ -223,6 +223,50 @@
     `;
   }
 
+  function createLookupEventId() {
+    const cryptoApi = globalThis.crypto;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID();
+    }
+    return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  // A lookup is an explicit open (click or keyboard activation). Hovering only
+  // previews the tooltip and must not inflate the lookup contribution.
+  function recordWordLookup(wordElement) {
+    if (!(wordElement instanceof HTMLElement)) {
+      return null;
+    }
+    const word = String(wordElement.dataset.word || wordElement.textContent || '').trim();
+    if (!word) {
+      return null;
+    }
+    const runtimeMessaging = globalThis.RuntimeMessaging;
+    if (
+      !runtimeMessaging ||
+      typeof runtimeMessaging.sendRuntimeMessage !== 'function' ||
+      !runtimeMessaging.MESSAGE_TYPES ||
+      !runtimeMessaging.MESSAGE_TYPES.LEARNING_RECORD_LOOKUP
+    ) {
+      return null;
+    }
+    const source = buildWordSourceMetadata();
+    const context = String(wordElement.dataset.originalSubtitle || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return runtimeMessaging
+      .sendRuntimeMessage(runtimeMessaging.MESSAGE_TYPES.LEARNING_RECORD_LOOKUP, {
+        word,
+        eventId: createLookupEventId(),
+        now: Date.now(),
+        level: wordElement.dataset.level || '',
+        sourceLevels: parseDataList(wordElement.dataset.sourceLevels),
+        context: context || undefined,
+        source: source || undefined,
+      })
+      .catch(() => null);
+  }
+
   function reportContextMisreplaceFeedback(word, options = {}) {
     if (
       !globalThis.SubtitleTranslator ||
@@ -433,16 +477,32 @@
     const wordNode = getWordNode(event.target);
     if (wordNode) {
       showTooltip(wordNode);
+      // detail === 0 marks a click synthesized from keyboard activation; the
+      // keydown handler already recorded that lookup.
+      if (event.detail !== 0) {
+        void recordWordLookup(wordNode);
+      }
       return;
     }
 
     hideTooltip();
   }
 
-  function handleEscape(event) {
+  function handleWordKeydown(event) {
     if (event.key === 'Escape') {
       hideTooltip();
+      return;
     }
+    if (event.key !== 'Enter' && event.key !== ' ') {
+      return;
+    }
+    const wordNode = getWordNode(event.target);
+    if (!wordNode) {
+      return;
+    }
+    event.preventDefault();
+    showTooltip(wordNode);
+    void recordWordLookup(wordNode);
   }
 
   function init() {
@@ -456,7 +516,7 @@
     document.addEventListener('focusin', handleFocusIn, true);
     document.addEventListener('focusout', handleFocusOut, true);
     document.addEventListener('click', handleDocumentClick, true);
-    document.addEventListener('keydown', handleEscape);
+    document.addEventListener('keydown', handleWordKeydown);
     window.addEventListener('resize', hideTooltip);
     initialized = true;
   }
@@ -471,7 +531,7 @@
     document.removeEventListener('focusin', handleFocusIn, true);
     document.removeEventListener('focusout', handleFocusOut, true);
     document.removeEventListener('click', handleDocumentClick, true);
-    document.removeEventListener('keydown', handleEscape);
+    document.removeEventListener('keydown', handleWordKeydown);
     window.removeEventListener('resize', hideTooltip);
     initialized = false;
     activeWordElement = null;
@@ -490,6 +550,7 @@
     buildHitReasonText,
     formatSourceTimeLabel,
     buildWordSourceMetadata,
+    recordWordLookup,
     reportContextMisreplaceFeedback,
     handleTooltipFeedback,
   };

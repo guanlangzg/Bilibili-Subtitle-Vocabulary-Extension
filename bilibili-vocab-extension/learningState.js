@@ -222,6 +222,25 @@
     );
   }
 
+  // A live bridge needs both the messaging module and a real chrome.runtime
+  // sendMessage; legacy test stubs expose the module without a transport.
+  function canUseBackgroundBridge() {
+    return (
+      hasRuntimeMessagingApi() &&
+      typeof chrome !== 'undefined' &&
+      chrome.runtime &&
+      typeof chrome.runtime.sendMessage === 'function'
+    );
+  }
+
+  function createClientEventId() {
+    const cryptoApi = globalScope.crypto;
+    if (cryptoApi && typeof cryptoApi.randomUUID === 'function') {
+      return cryptoApi.randomUUID();
+    }
+    return `evt-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
   function sendLearningMutation(type, payload) {
     if (!hasRuntimeMessagingApi()) {
       return Promise.reject(new Error('RuntimeMessaging unavailable'));
@@ -395,6 +414,8 @@
     const nextReviewAt = normalizeTimestamp(source.nextReviewAt) || derivedNextReviewAt;
     const nextReviewBucket = explicitBucket || getBucketFromSchedule(nextReviewAt, intervalDays);
 
+    const status = normalizeStatus(source.status || source.learningStatus);
+
     return {
       word,
       translation: String(
@@ -404,6 +425,7 @@
         .trim()
         .toUpperCase(),
       sourceLevels: normalizeLevels(source.sourceLevels, source.level || fallback.level),
+      bookCodes: normalizeLevels(source.bookCodes, source.level || fallback.level),
       exposureCount,
       hitCount: exposureCount,
       seenCount,
@@ -415,7 +437,15 @@
       lastSeenAt,
       lastReviewedAt,
       masteryScore: clampScore(source.masteryScore),
-      status: normalizeStatus(source.status || source.learningStatus),
+      status,
+      // Saved/suspended are the shared-data flags; status stays as the legacy
+      // display field so existing UI keeps working unchanged.
+      saved: typeof source.saved === 'boolean' ? source.saved : status === 'saved',
+      suspended: typeof source.suspended === 'boolean' ? source.suspended : status === 'skipped',
+      // Keep the formal scheduler snapshot (e.g. FSRS) intact. It must not be
+      // flattened into easeFactor/intervalDays, which are legacy display fields.
+      schedule:
+        source.schedule && typeof source.schedule === 'object' ? { ...source.schedule } : null,
       nextReviewBucket,
       intervalDays,
       easeFactor,
@@ -531,6 +561,23 @@
         next.intervalDays,
         nowTimestamp
       );
+      return next;
+    }
+
+    // A formal scheduler (e.g. FSRS) owns the due date. Exposure only counts;
+    // it must not move the App schedule onto the legacy two-hour cadence.
+    if (
+      base.schedule &&
+      base.schedule.algorithm &&
+      base.schedule.algorithm !== 'extension-interval'
+    ) {
+      next.status = base.status === 'skipped' ? 'skipped' : deriveStatus(next);
+      next.schedule = { ...base.schedule };
+      next.nextReviewAt = base.nextReviewAt;
+      next.nextReviewBucket = base.nextReviewBucket;
+      next.intervalDays = base.intervalDays;
+      next.easeFactor = base.easeFactor;
+      next.masteryScore = base.masteryScore;
       return next;
     }
 
@@ -1075,6 +1122,7 @@
       }),
       word: wordKey,
       status: 'saved',
+      saved: true,
       saveCount: normalizeCount((baseRecord.saveCount || 0) + 1),
       lastReviewedAt: normalizeTimestamp(now),
       savedAt: normalizeTimestamp(now),
@@ -1097,6 +1145,7 @@
       ...normalizeLearningRecord(existing),
       word: wordKey,
       status: 'seen',
+      saved: false,
       saveCount: normalizeCount(Math.max(0, (existing.saveCount || 1) - 1)),
       details: normalizeVocabularyDetails(existing.details),
       exposures: normalizeCount(
@@ -1160,18 +1209,20 @@
       // Single-writer path: the background queue merges this save onto the
       // latest stored snapshot so concurrent hits/reviews from other contexts
       // are never rolled back by a page-side full-map write.
-      if (hasRuntimeMessagingApi()) {
+      if (canUseBackgroundBridge()) {
         try {
           const result = await sendLearningMutation(
             globalScope.RuntimeMessaging.MESSAGE_TYPES.LEARNING_SAVE_WORD,
-            { word: wordKey, details, now }
+            { word: wordKey, details, now, eventId: createClientEventId() }
           );
           invalidateWordStatsCache();
           void updateLearningStreak(now);
           return Boolean(result && result.saved);
         } catch (error) {
+          // A live runtime that failed must not be bypassed: writing the shared
+          // stats here would drop the save event from the journal.
           logError('Vocabulary book background save failed', error);
-          // Fall through to the local read-modify-write fallback.
+          return false;
         }
       }
 
@@ -1210,17 +1261,17 @@
         return false;
       }
 
-      if (hasRuntimeMessagingApi()) {
+      if (canUseBackgroundBridge()) {
         try {
           const result = await sendLearningMutation(
             globalScope.RuntimeMessaging.MESSAGE_TYPES.LEARNING_REMOVE_WORD,
-            { word: wordKey, now: Date.now() }
+            { word: wordKey, now: Date.now(), eventId: createClientEventId() }
           );
           invalidateWordStatsCache();
           return Boolean(result && result.removed);
         } catch (error) {
           logError('Vocabulary book background remove failed', error);
-          // Fall through to the local read-modify-write fallback.
+          return false;
         }
       }
 
@@ -1294,6 +1345,8 @@
     buildLearningSummary,
     buildSavedWordRecord,
     buildRemovedWordRecord,
+    getIntervalByBucket,
+    getBucketFromSchedule,
     getStatusLabel,
     getReviewBucketLabel,
     saveWordToVocabularyBook,

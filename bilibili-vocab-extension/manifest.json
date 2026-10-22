@@ -33,6 +33,7 @@
         "experienceMetrics.js",
         "adaptiveTuning.js",
         "learningState.js",
+        "learningData.js",
         "utils.js",
         "vocabulary-pure.js",
         "vocabulary.js",

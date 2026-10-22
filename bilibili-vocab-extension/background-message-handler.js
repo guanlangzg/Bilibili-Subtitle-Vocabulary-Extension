@@ -20,6 +20,9 @@
   const backgroundLearningState =
     globalScope.BackgroundLearningState ||
     (typeof require === 'function' ? require('./background-learning-state.js') : null);
+  const backgroundLearningSync =
+    globalScope.BackgroundLearningSync ||
+    (typeof require === 'function' ? require('./background-learning-sync.js') : null);
 
   const SETTINGS_STORAGE_KEY_V3 =
     backgroundStorage && backgroundStorage.SETTINGS_STORAGE_KEY_V3
@@ -245,7 +248,38 @@
       runtimeMessaging &&
       messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_CLEAR_VOCABULARY
     ) {
-      task = () => backgroundLearningState.clearVocabulary();
+      task = () => backgroundLearningState.clearVocabulary(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_RECORD_LOOKUP
+    ) {
+      task = () => backgroundLearningState.recordLearningLookup(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_EXPORT_DATA
+    ) {
+      task = () => backgroundLearningState.exportLearningData(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.LEARNING_IMPORT_DATA
+    ) {
+      task = () => backgroundLearningState.importLearningData(message.payload || {});
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.SYNC_GET_SETTINGS
+    ) {
+      task = () => backgroundLearningSync.readSyncSettings();
+    } else if (
+      runtimeMessaging &&
+      messageType === runtimeMessaging.MESSAGE_TYPES.SYNC_SAVE_SETTINGS
+    ) {
+      task = () => backgroundLearningSync.saveSyncSettings(message.payload || {});
+    } else if (runtimeMessaging && messageType === runtimeMessaging.MESSAGE_TYPES.SYNC_GET_STATUS) {
+      task = () => backgroundLearningSync.readStatus(message.payload || {});
+    } else if (runtimeMessaging && messageType === runtimeMessaging.MESSAGE_TYPES.SYNC_RUN) {
+      // Network sync runs inside the shared queue so pull-import and the follow-up
+      // push observe one consistent local snapshot.
+      task = () => backgroundLearningSync.syncNow(message.payload || {});
     }
 
     if (!task) {
@@ -277,6 +311,10 @@
     persistAdaptiveFeedback,
     setAdaptiveEnabled,
     recordExperienceEvent,
+    initializeLearningData: () =>
+      backgroundLearningState
+        ? enqueueSharedStateMutation(() => backgroundLearningState.initializeLearningData())
+        : Promise.resolve({ initialized: false }),
     handleBackgroundMessage,
   };
 
