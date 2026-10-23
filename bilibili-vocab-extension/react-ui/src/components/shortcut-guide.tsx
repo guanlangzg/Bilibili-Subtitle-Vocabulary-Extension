@@ -156,13 +156,7 @@ function getGuideNote(state: ShortcutGuideState): string {
   return '当前环境无法读取浏览器绑定，以下显示推荐默认值。macOS 使用 Command 替代 Ctrl，快捷键可在 chrome://extensions/shortcuts 自定义。';
 }
 
-export function ShortcutGuide({
-  title = '快捷操作',
-  compact = false,
-}: {
-  title?: string;
-  compact?: boolean;
-}) {
+export function ShortcutGuide({ title = '快捷操作' }: { title?: string }) {
   const [guideState, setGuideState] = useState<ShortcutGuideState>(() =>
     buildLoadingShortcutGuideState()
   );
@@ -211,7 +205,7 @@ export function ShortcutGuide({
         <h3>{title}</h3>
         <span className={`badge${badge.tone ? ` ${badge.tone}` : ''}`}>{badge.label}</span>
       </div>
-      <div className={`shortcut-guide__list${compact ? ' shortcut-guide__list--compact' : ''}`}>
+      <div className="shortcut-guide__list">
         {guideState.items.map((item) => (
           <div className="shortcut-guide__item" key={item.id}>
             <div className="shortcut-guide__content">

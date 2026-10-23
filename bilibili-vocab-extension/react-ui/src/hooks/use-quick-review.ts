@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   readQuickReviewDashboard,
   subscribeQuickReviewSource,
@@ -46,20 +46,13 @@ export function useQuickReview(setStatus: (status: string) => void): {
   const [reviewSubmitting, setReviewSubmitting] = useState<QuickReviewAction | null>(null);
   const [encounteredRanking, setEncounteredRanking] = useState<EncounteredWordRankingItem[]>([]);
   const [rankingSortMode, setRankingSortMode] = useState<EncounteredWordSortMode>('asc');
+  // Ranking loads in its own effect; the shared subscription refreshes it
+  // through this handle so storage.onChanged is registered once.
+  const reloadRankingRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     let cancelled = false;
-    void readQuickReviewDashboard()
-      .then((dashboardPayload) => {
-        if (cancelled) return;
-        setSummary(dashboardPayload.summary);
-        setQuickReview(dashboardPayload);
-      })
-      .catch(() => {
-        if (!cancelled) setStatus('学习概览读取失败，请稍后重试。');
-      });
-
-    const unsubscribe = subscribeQuickReviewSource(() => {
+    const loadDashboard = (failureMessage: string) => {
       void readQuickReviewDashboard()
         .then((next) => {
           if (cancelled) return;
@@ -67,8 +60,14 @@ export function useQuickReview(setStatus: (status: string) => void): {
           setSummary(next.summary);
         })
         .catch(() => {
-          if (!cancelled) setStatus('学习数据读取失败，请稍后重试。');
+          if (!cancelled) setStatus(failureMessage);
         });
+    };
+    loadDashboard('学习概览读取失败，请稍后重试。');
+
+    const unsubscribe = subscribeQuickReviewSource(() => {
+      loadDashboard('学习数据读取失败，请稍后重试。');
+      reloadRankingRef.current();
     });
 
     return () => {
@@ -87,15 +86,7 @@ export function useQuickReview(setStatus: (status: string) => void): {
 
   useEffect(() => {
     let cancelled = false;
-    void readEncounteredWordRanking(rankingSortMode, 6)
-      .then((items) => {
-        if (!cancelled) setEncounteredRanking(items);
-      })
-      .catch(() => {
-        if (!cancelled) setStatus('生词排行读取失败，请稍后重试。');
-      });
-
-    const unsubscribe = subscribeQuickReviewSource(() => {
+    const loadRanking = () => {
       void readEncounteredWordRanking(rankingSortMode, 6)
         .then((items) => {
           if (!cancelled) setEncounteredRanking(items);
@@ -103,11 +94,13 @@ export function useQuickReview(setStatus: (status: string) => void): {
         .catch(() => {
           if (!cancelled) setStatus('生词排行读取失败，请稍后重试。');
         });
-    });
+    };
+    reloadRankingRef.current = loadRanking;
+    loadRanking();
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      reloadRankingRef.current = () => {};
     };
   }, [rankingSortMode, setStatus]);
 

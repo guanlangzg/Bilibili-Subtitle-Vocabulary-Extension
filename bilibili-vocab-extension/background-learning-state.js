@@ -151,11 +151,6 @@
     return legacy;
   }
 
-  function createEventId() {
-    requireLearningModules();
-    return learningDataApi.randomId();
-  }
-
   function normalizeBookCodes(value, fallbackRecord) {
     const source = Array.isArray(value)
       ? value
@@ -290,7 +285,6 @@
       WORD_STATS_STORAGE_KEY,
       LEARNING_WORD_STATS_STORAGE_KEY,
       REVIEW_QUEUE_STORAGE_KEY,
-      LEARNING_SUMMARY_STORAGE_KEY,
       LEARNING_DATA_STORAGE_KEY,
     ]);
     let stats = normalizeStatsMap(payload[LEARNING_WORD_STATS_STORAGE_KEY]);
@@ -413,11 +407,11 @@
     const candidate = buildEvent(snapshot, payload, hit.word, currentRecord, 'exposure');
     const duplicate = resolveDuplicate(snapshot, candidate);
     if (duplicate) {
-      return resultFromSnapshot(snapshot, {
+      return {
         duplicate: true,
         eventId: duplicate.eventId,
         word: hit.word,
-      });
+      };
     }
 
     const nextRecord = learningState.recordExposure(currentRecord, hit.exposure, hit.now);
@@ -429,8 +423,8 @@
         sourceLevels: hit.exposure.sourceLevels || nextRecord.sourceLevels,
       },
     };
-    const result = await commitEvents(snapshot, [candidate], overrides, hit.now);
-    return { ...result, word: hit.word, eventId: candidate.eventId };
+    await commitEvents(snapshot, [candidate], overrides, hit.now);
+    return { word: hit.word, eventId: candidate.eventId };
   }
 
   function normalizeReviewAction(action) {
@@ -856,7 +850,6 @@
     REVIEW_QUEUE_STORAGE_KEY,
     LEARNING_SUMMARY_STORAGE_KEY,
     LEARNING_DATA_STORAGE_KEY,
-    createEventId,
     readLearningSnapshot,
     initializeLearningData,
     recordLearningHit,

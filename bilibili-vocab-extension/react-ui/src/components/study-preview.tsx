@@ -13,7 +13,6 @@ interface StudyPreviewProps {
   title: string;
   subtitle: string;
   sentenceVariant: 'options' | 'popup';
-  compact?: boolean;
 }
 
 interface PreviewToken {
@@ -73,13 +72,7 @@ function renderPreviewSentence(
   );
 }
 
-export function StudyPreview({
-  profile,
-  title,
-  subtitle,
-  sentenceVariant,
-  compact = false,
-}: StudyPreviewProps) {
+export function StudyPreview({ profile, title, subtitle, sentenceVariant }: StudyPreviewProps) {
   const learningProfile = getLearningProfile(profile);
   const previewTokens = getPreviewTokens(
     getMockPreviewData(profile.targetCefr, profile.replaceRatio, profile.maxReplaceCount),
@@ -92,7 +85,7 @@ export function StudyPreview({
       : '这段视频会帮你建立稳定的词汇输入节奏。';
 
   return (
-    <div className={`study-preview stack${compact ? ' study-preview--compact' : ''}`}>
+    <div className="study-preview stack">
       <div className="inline">
         <div>
           <h3>{title}</h3>

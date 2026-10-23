@@ -80,6 +80,7 @@
   let overlayLoaderController = null;
   let lifecycleMessagesWatching = false;
   let lifecycleMessageHandler = null;
+  let tornDown = false;
 
   const LRUCacheCtor =
     globalThis.Utils && typeof globalThis.Utils.LRUCache === 'function'
@@ -530,16 +531,6 @@
     return subtitleNavigationController;
   }
 
-  function containsUnsafeContent(root) {
-    if (
-      !webTextReplacementRuntime ||
-      typeof webTextReplacementRuntime.containsUnsafeContent !== 'function'
-    ) {
-      return true;
-    }
-    return webTextReplacementRuntime.containsUnsafeContent(root);
-  }
-
   function shouldReplaceWebTextNode(result, sourceText) {
     if (
       !webTextReplacementRuntime ||
@@ -607,6 +598,9 @@
   }
 
   function teardownContentRuntime() {
+    tornDown = true;
+    // Invalidate in-flight applyTranslation work that started before teardown.
+    renderGeneration += 1;
     try {
       // Stop chrome event listeners first so no settings change can
       // resurrect observers, timers or video bindings after teardown.
@@ -725,7 +719,13 @@
 
   // --- Initialization ---
   async function init() {
+    if (tornDown) {
+      return;
+    }
     const overlayModule = await loadOverlayModule();
+    if (tornDown) {
+      return;
+    }
     if (
       !globalThis.SubtitleParser ||
       !globalThis.SubtitleTranslator ||
@@ -744,7 +744,13 @@
         return [];
       }),
     ]);
+    if (tornDown) {
+      return;
+    }
     await getSettings();
+    if (tornDown) {
+      return;
+    }
     translationPipeline.clearTranslationCache();
 
     globalThis.TooltipModule.init();
@@ -783,7 +789,6 @@
 
   if (typeof module !== 'undefined' && module.exports) {
     module.exports = {
-      TRANSLATION_SETTINGS_KEYS: C.TRANSLATION_SETTINGS_KEYS,
       buildRuntimeSettings,
       classifyRuntimeSettingsChange,
       createRenderSignature: translationPipeline.createRenderSignature,
@@ -826,14 +831,9 @@
         return getDomObserver().shouldRunLegacyWebTextPipeline(...args);
       },
       shouldReplaceWebTextNode,
-      containsUnsafeContent,
       normalizeSubtitleNavigationAction: navBridge.normalizeSubtitleNavigationAction,
       findSubtitleNavigationIndices: navBridge.findSubtitleNavigationIndices,
       buildSubtitleNavigationSnapshot: navBridge.buildSubtitleNavigationSnapshot,
-      createSubtitleNavigationSnapshotSignature:
-        navBridge.createSubtitleNavigationSnapshotSignature,
-      createOverlaySubtitleNavigationSignature: navBridge.createOverlaySubtitleNavigationSignature,
-      isSubtitleNavigationStreamPort: navBridge.isSubtitleNavigationStreamPort,
       readOverlaySubtitleNavigationPayload: navBridge.readOverlaySubtitleNavigationPayload,
       refreshOverlaySubtitleNavigation: navBridge.refreshOverlaySubtitleNavigation,
       subscribeOverlaySubtitleNavigation: navBridge.subscribeOverlaySubtitleNavigation,

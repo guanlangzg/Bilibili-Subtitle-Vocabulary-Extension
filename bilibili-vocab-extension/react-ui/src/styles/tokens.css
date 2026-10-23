@@ -140,8 +140,7 @@
   --bsv-z-toast: 1200;
 }
 
-body.v3-page[data-bsv-theme="dark"],
-.v3-page--dark {
+body.v3-page[data-bsv-theme="dark"] {
   color-scheme: dark;
 
   /* Core canvas — deep slate surfaces preserve hierarchy without pure black */

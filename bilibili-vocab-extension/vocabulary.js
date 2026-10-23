@@ -75,7 +75,6 @@
   let persistTimer = null;
   let persistChain = Promise.resolve();
   let reviewQueue = {};
-  let learningSummary = null;
   const learningHitOutbox = [];
   let learningHitOutboxFlushPromise = null;
   const LEARNING_HIT_OUTBOX_LIMIT = 100;
@@ -290,15 +289,6 @@
     });
   }
 
-  function refreshLearningSummary(records) {
-    if (!learningState) {
-      return null;
-    }
-
-    learningSummary = learningState.buildLearningSummary(records, reviewQueue);
-    return learningSummary;
-  }
-
   function buildActiveLearningRecords(entries = vocabularyEntries) {
     return entries.reduce((accumulator, item) => {
       const itemKey = normalizeWordKey(item.word);
@@ -317,21 +307,6 @@
       }
       return accumulator;
     }, {});
-  }
-
-  // Rebuilding this map from all entries on every hit costs O(catalog); keep it incremental instead.
-  let activeLearningRecords = {};
-
-  function rebuildActiveLearningRecords() {
-    activeLearningRecords = buildActiveLearningRecords(vocabularyEntries);
-    return activeLearningRecords;
-  }
-
-  function updateActiveLearningRecord(key, entry) {
-    if (!key || !entry) {
-      return;
-    }
-    activeLearningRecords[key] = toLearningRecord(entry);
   }
 
   function createPersistSnapshot(
@@ -429,22 +404,50 @@
     }
   }
 
-  function replaceEntryInIndexes(oldEntry, newEntry) {
-    const key = normalizeWordKey(newEntry.word);
-    const entryIndex = vocabularyEntries.indexOf(oldEntry);
-    if (entryIndex >= 0) vocabularyEntries[entryIndex] = newEntry;
-    if (key) wordIndex.set(key, newEntry);
-
-    if (Array.isArray(oldEntry.meaningTerms)) {
-      oldEntry.meaningTerms.forEach((term) => {
-        const token = String(term || '').trim();
-        if (!token || token.length < 2) return;
-        const entries = chineseTokenIndex.get(token);
-        if (!entries) return;
-        const idx = entries.indexOf(oldEntry);
-        if (idx >= 0) entries[idx] = newEntry;
-      });
+  // Learning updates must preserve the level entry selected for wordIndex.
+  function replaceIndexedEntryRefs(oldEntry, newEntry) {
+    if (!oldEntry || !newEntry) {
+      return;
     }
+
+    const key = normalizeWordKey(newEntry.word);
+    if (key && wordIndex.get(key) === oldEntry) {
+      wordIndex.set(key, newEntry);
+    }
+
+    const grouped = key ? wordEntriesIndex.get(key) : null;
+    if (grouped) {
+      for (let index = 0; index < grouped.length; index += 1) {
+        if (grouped[index] === oldEntry) {
+          grouped[index] = newEntry;
+        }
+      }
+    }
+
+    const terms = Array.isArray(oldEntry.matchTerms) ? oldEntry.matchTerms : [];
+    terms.forEach((term) => {
+      const bucket = chineseTokenIndex.get(term);
+      if (!bucket) {
+        return;
+      }
+      for (let index = 0; index < bucket.length; index += 1) {
+        if (bucket[index] === oldEntry) {
+          bucket[index] = newEntry;
+        }
+      }
+    });
+  }
+
+  function replaceEntryInIndexes(oldEntry, newEntry) {
+    if (!oldEntry || !newEntry) {
+      return;
+    }
+
+    const entryIndex = vocabularyEntries.indexOf(oldEntry);
+    if (entryIndex >= 0) {
+      vocabularyEntries[entryIndex] = newEntry;
+    }
+    replaceIndexedEntryRefs(oldEntry, newEntry);
   }
 
   function applyRecordToWordEntries(wordKey, record) {
@@ -453,10 +456,9 @@
       return;
     }
 
-    entries.forEach((entry, index) => {
-      const updated = applyLearningRecordToEntry(entry, record);
-      entries[index] = updated;
-      replaceEntryInIndexes(entry, updated);
+    // Snapshot first: the shared helper rewrites this bucket in place.
+    entries.slice().forEach((entry) => {
+      replaceEntryInIndexes(entry, applyLearningRecordToEntry(entry, record));
     });
   }
 
@@ -468,12 +470,12 @@
         return;
       }
 
-      entries[index] = applyLearningRecordToEntry(entry, records[key]);
+      const updated = applyLearningRecordToEntry(entry, records[key]);
+      entries[index] = updated;
+      replaceIndexedEntryRefs(entry, updated);
     });
 
     reviewQueue = storedData && storedData.queue ? { ...storedData.queue } : {};
-    learningSummary =
-      storedData && storedData.summary ? storedData.summary : refreshLearningSummary(records);
   }
 
   // `core` narrows to the curated tier, but IELTS/TOEFL carry no core entries and
@@ -527,7 +529,6 @@
     });
 
     coreLevelsInDataset = collectCoreLevelDataset(entries).coreLevels;
-    rebuildActiveLearningRecords();
   }
 
   async function fetchLevelVocabulary(level) {
@@ -587,8 +588,9 @@
 
   async function refreshLearningStateFromStorage() {
     const storedData = await readStoredStats();
+    // applyStoredStats refreshes index references in place; rebuilding here would
+    // re-scan the fixed catalog on every cross-tab learning write.
     applyStoredStats(vocabularyEntries, storedData);
-    rebuildIndex(vocabularyEntries);
     return vocabularyEntries;
   }
 
@@ -875,9 +877,7 @@
       };
       const nextRecord = learningState.recordExposure(previousRecord, exposurePayload, now);
       applyRecordToWordEntries(key, nextRecord);
-      updateActiveLearningRecord(key, wordIndex.get(key));
       reviewQueue = learningState.syncReviewQueue(reviewQueue, nextRecord, now);
-      refreshLearningSummary(activeLearningRecords);
       void persistLearningHit(previousRecord, exposurePayload, now, createEventId());
     } else {
       entry.hitCount = normalizeHitCount(entry.hitCount) + 1;
@@ -1002,15 +1002,10 @@
       const updated = applyLearningRecordToEntry(entry, committedRecord);
       replaceEntryInIndexes(entry, updated);
       applyRecordToWordEntries(key, committedRecord);
-      updateActiveLearningRecord(key, wordIndex.get(key));
       reviewQueue =
         committedPayload && committedPayload.queue && typeof committedPayload.queue === 'object'
           ? learningState.normalizeReviewQueue(committedPayload.queue)
           : learningState.syncReviewQueue(reviewQueue, committedRecord, now);
-      learningSummary =
-        committedPayload && committedPayload.summary && typeof committedPayload.summary === 'object'
-          ? committedPayload.summary
-          : refreshLearningSummary(activeLearningRecords);
       maybePersistAdaptiveFeedback(normalizedAction, now);
       if (typeof learningState.updateLearningStreak === 'function') {
         void learningState.updateLearningStreak(now);
@@ -1046,7 +1041,6 @@
 
     persistChain = Promise.resolve();
     reviewQueue = {};
-    learningSummary = null;
     vocabularyEntries = Array.isArray(entries)
       ? entries.map((entry) => normalizeEntry(entry, normalizeLevel(entry.level) || 'CET4'))
       : [];

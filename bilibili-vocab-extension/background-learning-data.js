@@ -120,14 +120,6 @@
     };
   }
 
-  function ensureState(rawState, stats, now) {
-    const normalized = normalizeState(rawState);
-    if (normalized) {
-      return normalized;
-    }
-    return createState(stats, now);
-  }
-
   function findEvent(state, eventId) {
     if (!state || !eventId) {
       return null;
@@ -359,7 +351,6 @@
     createEmptyBundle,
     normalizeState,
     createState,
-    ensureState,
     findEvent,
     createExtensionEvent,
     appendEvents,

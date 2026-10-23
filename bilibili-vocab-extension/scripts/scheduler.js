@@ -2,11 +2,22 @@
   const DEFAULT_INTERVAL_MS = 3400;
   const MAX_ASSOCIATED_PER_CLUSTER = 1;
   const MAX_COOLDOWN_QUEUE_LENGTH = 60;
+  const DEBUG_LOG_FLAG = '__BILI_VOCAB_DEBUG_LOGS__';
   const DENSITY_PRESET_TO_INTERVAL_MS = {
     sparse: 4200,
     normal: 3400,
     dense: 2600,
   };
+
+  function logDebug(...args) {
+    if (globalScope[DEBUG_LOG_FLAG] !== true) {
+      return;
+    }
+    if (typeof console === 'undefined' || typeof console.debug !== 'function') {
+      return;
+    }
+    console.debug(...args);
+  }
 
   function normalizeDensityPreset(value) {
     const normalized = String(value || 'normal')
@@ -317,7 +328,7 @@
       }
 
       if (!candidate) {
-        console.debug(
+        logDebug(
           '[DanmakuReview] tick: no candidate. poolSize:',
           Array.isArray(pool) ? pool.length : 0,
           'cooldownSize:',
@@ -330,7 +341,7 @@
 
       const fired = shootDanmaku(candidate, isAssociated);
       if (!fired) {
-        console.debug(
+        logDebug(
           '[DanmakuReview] tick: shootDanmaku returned false for',
           candidate.word,
           'isAssociated:',
@@ -352,7 +363,7 @@
       if (timer) {
         return;
       }
-      console.debug('[DanmakuReview] Engine started, interval:', intervalMs, 'ms');
+      logDebug('[DanmakuReview] Engine started, interval:', intervalMs, 'ms');
       timer = setInterval(tick, intervalMs);
       tick();
     }

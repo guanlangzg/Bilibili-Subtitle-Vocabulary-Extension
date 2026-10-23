@@ -50,15 +50,6 @@
   const sharedSettings =
     globalScope.SharedSettings ||
     (typeof require === 'function' ? require('./sharedSettings.js') : null);
-  const runtimeMessaging =
-    globalScope.RuntimeMessaging ||
-    (typeof require === 'function' ? require('./runtimeMessaging.js') : null);
-  const adaptiveTuning =
-    globalScope.AdaptiveTuning ||
-    (typeof require === 'function' ? require('./adaptiveTuning.js') : null);
-  const experienceMetrics =
-    globalScope.ExperienceMetrics ||
-    (typeof require === 'function' ? require('./experienceMetrics.js') : null);
   const backgroundSettings =
     globalScope.BackgroundSettings ||
     (typeof require === 'function' ? require('./background-settings.js') : null);

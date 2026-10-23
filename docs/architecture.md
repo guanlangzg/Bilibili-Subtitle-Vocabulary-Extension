@@ -24,6 +24,9 @@ graph TB
             BG_MSG["background-message-handler.js"]
             BG_SET["background-settings.js"]
             BG_STG["background-storage.js"]
+            BG_LEARNING["background-learning-state.js"]
+            BG_DATA["background-learning-data.js / learningData.js"]
+            BG_SYNC["background-learning-sync.js / learningDataSync.js"]
         end
 
         subgraph ReactUI["React UI Surfaces"]
@@ -60,6 +63,13 @@ graph TB
     BG -->|"importScripts"| BG_MSG
     BG -->|"importScripts"| BG_SET
     BG -->|"importScripts"| BG_STG
+    BG -->|"importScripts"| BG_LEARNING
+    BG -->|"importScripts"| BG_DATA
+    BG -->|"importScripts"| BG_SYNC
+    BG_LEARNING -->|"serialized learning mutations"| BG_DATA
+    BG_DATA -->|"bundle / projections"| CHROME_STG
+    BG_SYNC -->|"pull / import / push"| BG_DATA
+    BG_SYNC -->|"user-triggered HTTP(S) sync"| SYNC_SERVER[("User-configured sync server")]
     BG -->|"chrome.runtime.sendMessage"| CS_INDEX
     BG -->|"chrome.tabs.sendMessage"| CS_INDEX
 
@@ -103,6 +113,9 @@ The service worker is the single source of truth for persisted settings and cros
 - **`background-storage.js`** wraps `chrome.storage.local` writes, handles migration from legacy keys to `bili_vocab_settings_v3`, and logs storage errors.
 - **`background-message-handler.js`** routes runtime messages from Popup / Options / Overlay (settings commit, adaptive tuning, experience metrics, etc.).
 - **`background-commands.js`** persists shortcut-command changes (toggle enabled, toggle overlay, increase/decrease ratio) and broadcasts `SETTINGS_UPDATED` to all tabs.
+- **`background-learning-state.js`** serializes learning actions, including exposure, save, unsave, and review.
+- **`background-learning-data.js`** uses the pure protocol in **`learningData.js`** to migrate, merge, and persist learning facts and derive local learning-state projections.
+- **`background-learning-sync.js`** and **`learningDataSync.js`** handle the user-configured server and token, validate sync responses, and perform a manual pull/import/push cycle.
 
 The background worker writes to `chrome.storage.local` before responding, so even if Manifest V3 terminates the worker mid-flight, the React UI can fall back to reading storage directly.
 
@@ -122,7 +135,7 @@ All three surfaces use the hooks in `react-ui/src/hooks/` and the storage bridge
 - **`react-ui/src/lib/storage.ts`** is the main storage bridge used by Popup and Options. It wraps `chrome.storage.local`, provides `subscribe*` helpers for live updates, and implements learning-state operations (quick review, encountered-word ranking, vocabulary export, site permissions).
 - **`react-ui/src/lib/overlay-storage.ts`** is a smaller, overlay-only storage bridge that avoids pulling the entire learning dashboard into the overlay bundle.
 - **`react-ui/src/lib/settings-bridge.ts`** / **`overlay-settings.ts`** mirror the v3 schema in TypeScript so the React surfaces have typed access to the same data model used by `sharedSettings.js`.
-- **`runtimeMessaging.ts`** sends messages to the background worker with a storage-read fallback for Manifest V3 resilience.
+- **`react-ui/src/lib/runtime-messaging.ts`** sends messages to the background worker with a storage-read fallback for Manifest V3 resilience.
 
 Key storage keys:
 
@@ -137,7 +150,7 @@ Key storage keys:
 
 ### Vocabulary data (`data/*.json`)
 
-- `data/cet4.json`, `cet6.json`, `kaoyan.json`, `ielts.json`, `toefl.json`, and `sources.json` are the built-in word lists shipped with the extension.
+- `data/cet4.json`, `cet6.json`, `kaoyan.json`, `ielts.json`, and `toefl.json` are the built-in word lists shipped with the extension. `sources.json` and `data/ATTRIBUTION.md` record source provenance and attribution.
 - `vocabulary.js` / `vocabulary-pure.js` load these JSON files, merge them according to the active levels, and expose lookup APIs used by `translator.js`.
 
 ## How the layers communicate

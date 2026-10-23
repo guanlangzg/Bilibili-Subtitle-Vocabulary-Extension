@@ -557,7 +557,6 @@ function OptionsApp() {
             )}
             {section === 'sites' && (
               <SitesManagementSection
-                working={working}
                 siteRules={siteRules}
                 newSite={newSite}
                 setNewSite={setNewSite}

@@ -88,7 +88,7 @@ Bilibili 和 YouTube 上有海量带中英字幕的视频，是天然的语境�
 
 - 默认自动注入范围仅限 Bilibili 和 YouTube。
 - 非默认站点需要用户主动授权（`optional_host_permissions: *://*/*`）。
-- 零遥测、零云同步、零远程翻译服务，所有数据本地存储。
+- 零遥测、零远程翻译服务，数据默认保存在本地；可自行配置服务器，手动同步学习记录。
 
 ---
 
@@ -127,7 +127,7 @@ pnpm install --frozen-lockfile
 pnpm run build:extension
 ```
 
-构建产物在 `bilibili-vocab-extension/` 根目录，按"方式一"步骤 3–6 加载即可。
+React 界面构建产物位于 `bilibili-vocab-extension/dist/`。按“方式二”步骤 3–6 加载包含 `manifest.json` 的 `bilibili-vocab-extension/` 目录即可。
 
 ---
 
@@ -170,11 +170,12 @@ pnpm run build:extension
 
 ## 隐私与权限
 
-本扩展遵循**零遥测、零云同步、最小权限**原则。
+本扩展遵循**本地优先、零遥测、最小权限**原则。
 
-- **数据存储**：设置、生词本、复习队列、学习指标全部存储在 `chrome.storage.local`，不离开本机。
-- **网络请求**：仅请求 Bilibili 官方字幕 API；YouTube 字幕从页面 DOM 读取；无任何第三方分析、广告、翻译服务。
-- **权限范围**：默认仅 Bilibili 和 YouTube；其他站点需用户主动授权。
+- **数据存储**：设置、生词本、复习队列、学习指标默认存储在 `chrome.storage.local`。
+- **可选学习记录同步**：在 Options 中自行配置服务器地址和令牌、授权服务器主机后，可点击“立即同步”交换学习记录。同步数据范围见[隐私政策](docs/隐私政策.md)。
+- **网络请求**：请求 Bilibili 官方字幕 API，以及用户主动配置的同步服务器；YouTube 字幕从页面 DOM 读取；无第三方分析、广告或远程翻译服务。
+- **权限范围**：默认仅 Bilibili 和 YouTube；其他站点和同步服务器需用户主动授权。
 - **数据导出**：可在 Options 中一键导出 / 导入全部学习数据（JSON）。
 
 详细权限清单与数据流见：

@@ -365,7 +365,7 @@ test('continuous optimization: runContinuousOptimization should write reports an
   }
 });
 
-test('continuous optimization: runContinuousOptimization should keep legacy popup/options deferred and browser smoke out of shard coverage', async () => {
+test('continuous optimization: runContinuousOptimization should keep unassigned tests separate from out-of-band smoke specs', async () => {
   const workspace = createWorkspace();
   const testsDir = path.join(workspace, 'tests');
   const reportDir = path.join(workspace, 'reports');
@@ -402,7 +402,7 @@ test('continuous optimization: runContinuousOptimization should keep legacy popu
       'browser-extension-smoke.spec.js',
       'extension-zip-smoke.spec.js',
       'real-site-smoke.spec.js',
-      'popup.test.js',
+      'unassigned-helper.test.js',
     ]);
 
     const summary = await runContinuousOptimization({
@@ -421,34 +421,25 @@ test('continuous optimization: runContinuousOptimization should keep legacy popu
     });
 
     assert.equal(summary.overallStatus, 'pass');
-    assert.deepEqual(summary.unassignedTests, []);
+    assert.deepEqual(summary.unassignedTests, ['unassigned-helper.test.js']);
     assert.deepEqual(summary.outOfBandSmokeTests, [
       'browser-extension-smoke.spec.js',
       'extension-zip-smoke.spec.js',
       'real-site-smoke.spec.js',
     ]);
-    assert.deepEqual(summary.deferredLegacyTests, ['popup.test.js']);
-    assert.equal(summary.nextFocusCandidates[0].id, 'content-script-decomposition');
-
-    const deferredCandidate = summary.nextFocusCandidates.at(-1);
-    assert.equal(deferredCandidate.id, 'legacy-deferred-tests');
-    assert.equal(deferredCandidate.title, '迁移或淘汰 legacy popup/options shell 测试');
-    assert.deepEqual(deferredCandidate.files, ['popup.test.js']);
-    assert.match(
-      deferredCandidate.rationale,
-      /dist\/popup\.html.*dist\/options\.html[\s\S]*legacy popup\/options 入口/
-    );
-    assert.match(deferredCandidate.rationale, /shared-settings-integration\.test\.js/);
+    assert.equal(summary.deferredLegacyTests, undefined);
+    assert.equal(summary.nextFocusCandidates[0].id, 'unassigned-tests');
+    assert.deepEqual(summary.nextFocusCandidates[0].files, ['unassigned-helper.test.js']);
+    assert.equal(summary.nextFocusCandidates[1].id, 'content-script-lifecycle-coverage');
 
     const latestReport = JSON.parse(fs.readFileSync(path.join(reportDir, 'latest.json'), 'utf8'));
-    assert.deepEqual(latestReport.unassignedTests, []);
+    assert.deepEqual(latestReport.unassignedTests, ['unassigned-helper.test.js']);
     assert.deepEqual(latestReport.outOfBandSmokeTests, [
       'browser-extension-smoke.spec.js',
       'extension-zip-smoke.spec.js',
       'real-site-smoke.spec.js',
     ]);
-    assert.deepEqual(latestReport.deferredLegacyTests, ['popup.test.js']);
-    assert.equal(latestReport.nextFocusCandidates[0].id, 'content-script-decomposition');
+    assert.equal(latestReport.nextFocusCandidates[0].id, 'unassigned-tests');
 
     const markdown = fs.readFileSync(path.join(reportDir, 'latest.md'), 'utf8');
     assert.match(markdown, /Out-of-Band Smoke Tests/);
@@ -458,13 +449,8 @@ test('continuous optimization: runContinuousOptimization should keep legacy popu
     assert.match(markdown, /pnpm run test:extension-smoke/);
     assert.match(markdown, /pnpm run test:zip-smoke/);
     assert.match(markdown, /pnpm run test:real-site-smoke/);
-    assert.match(markdown, /Legacy Deferred Tests/);
-    assert.match(markdown, /popup\.test\.js/);
-    assert.match(
-      markdown,
-      /manifest \/ pack 真实交付入口是 `dist\/popup\.html` \/ `dist\/options\.html`[\s\S]*root `popup\.js` \/ `options\.js`/
-    );
-    assert.match(markdown, /迁移可复用逻辑到 shared helper 或单独 legacy lane/);
+    assert.match(markdown, /unassigned-helper\.test\.js/);
+    assert.doesNotMatch(markdown, /Legacy Deferred Tests/);
   } finally {
     fs.rmSync(workspace, { recursive: true, force: true });
   }

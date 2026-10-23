@@ -117,7 +117,8 @@ export function SyncSection() {
       const result = await runSync();
       setSettings(result.settings);
       setMessage(
-        `同步完成：拉取 ${result.pulledEvents} 条事件 / ${result.pulledBaselines} 条基线，上传 ${result.acceptedEvents} 条事件 / ${result.acceptedBaselines} 条基线，重复 ${result.duplicates} 条。`
+        `同步完成：拉取 ${result.pulledEvents} 条事件 / ${result.pulledBaselines} 条基线，上传 ${result.acceptedEvents} 条事件 / ${result.acceptedBaselines} 条基线，重复 ${result.duplicates} 条。` +
+          (result.hasMore ? '仍有远端记录待拉取，请再次同步。' : '')
       );
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : '同步失败');
@@ -246,7 +247,7 @@ export function SyncSection() {
         </div>
         <div className="summary-item">
           <strong>冲突整包拒绝</strong>
-          <span>同一事件 ID 内容不一致时服务器拒绝整次推送，本地数据不会被改写。</span>
+          <span>同一标识的冲突记录不会覆盖原记录；上传失败后，已导入的远端记录仍会保留。</span>
         </div>
         <div className="summary-item">
           <strong>令牌只存在本地</strong>

@@ -165,23 +165,8 @@ export interface VocabularySource {
   timeLabel?: string;
 }
 
-export interface VocabularyWord {
-  word: string;
-  status: string;
-  savedAt?: number;
-  exposures?: number;
-  context?: string;
-  source?: VocabularySource;
-  details?: {
-    meaning?: string;
-    level?: string;
-    phonetic?: string;
-  };
-}
+type VocabularyWordDetails = NonNullable<LearningRecord['details']>;
 
-type VocabularyWordDetails = NonNullable<VocabularyWord['details']>;
-
-export type VocabularyExportFormat = 'json' | 'csv' | 'anki';
 export type ActiveTabSubtitleNavigationAction = 'previous' | 'replay' | 'next';
 export type OnboardingGoal = ScenePresetKey;
 
@@ -215,37 +200,6 @@ export interface ActiveTabSitePermissionState {
   canRequest: boolean;
   canRevoke: boolean;
   message: string;
-}
-
-function normalizeVocabularyWord(input: unknown): VocabularyWord | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const source = input as Record<string, unknown>;
-  const detailsSource =
-    source.details && typeof source.details === 'object'
-      ? (source.details as Record<string, unknown>)
-      : {};
-  const word = String(source.word || '').trim();
-  const status = String(source.status || '')
-    .trim()
-    .toLowerCase();
-  if (!word || !status) {
-    return null;
-  }
-  const exposures = Number(source.exposures ?? source.exposureCount ?? source.hitCount);
-  const normalizedSource = normalizeVocabularySource(source, detailsSource);
-
-  return {
-    word,
-    status,
-    savedAt: normalizeTimestamp(source.savedAt) ?? undefined,
-    exposures: Number.isFinite(exposures) && exposures > 0 ? Math.floor(exposures) : 0,
-    context: normalizeVocabularyContext(source, detailsSource),
-    source: normalizedSource,
-    details: normalizeVocabularyDetails(Object.keys(detailsSource).length ? detailsSource : source),
-  };
 }
 
 export interface LearningStreak {
@@ -1005,19 +959,78 @@ function buildQuickReviewItems(
   return sortQuickReviewItems(items).slice(0, safeLimit);
 }
 
+function collectQueuedLearningStats(
+  rawStats: unknown,
+  queue: Record<string, ReviewQueueEntry>,
+  learningState: LearningStateApi,
+  migrateLegacy: boolean
+): Record<string, LearningRecord> {
+  const normalize = migrateLegacy
+    ? learningState.migrateLegacyStat
+    : learningState.normalizeLearningRecord;
+  if (!rawStats || typeof rawStats !== 'object' || typeof normalize !== 'function') {
+    return {};
+  }
+
+  const wanted = new Set<string>();
+  Object.values(queue).forEach((item) => {
+    const key = String(item.word || '')
+      .trim()
+      .toLowerCase();
+    if (key) {
+      wanted.add(key);
+    }
+  });
+  if (!wanted.size) {
+    return {};
+  }
+
+  const source = rawStats as Record<string, unknown>;
+  const matched: Record<string, unknown> = {};
+  Object.keys(source).forEach((key) => {
+    const normalizedKey = key.trim().toLowerCase();
+    if (wanted.has(normalizedKey) && matched[normalizedKey] === undefined) {
+      matched[normalizedKey] = source[key];
+    }
+  });
+
+  const normalized: Record<string, LearningRecord> = {};
+  Object.keys(matched).forEach((key) => {
+    const item = matched[key];
+    if (!item || typeof item !== 'object') {
+      return;
+    }
+    const record = migrateLegacy
+      ? (normalize as NonNullable<LearningStateApi['migrateLegacyStat']>)(item)
+      : (normalize as NonNullable<LearningStateApi['normalizeLearningRecord']>)(item, {
+          word: (item as Record<string, unknown>).word || key,
+          level: (item as Record<string, unknown>).level,
+        });
+    const normalizedWord = String(record.word || '')
+      .trim()
+      .toLowerCase();
+    if (!normalizedWord) {
+      return;
+    }
+    normalized[normalizedWord] = migrateLegacy
+      ? record
+      : {
+          ...record,
+          ...buildLearningRecordExportMetadata(item),
+        };
+  });
+  return normalized;
+}
+
 async function readQuickReviewState(limit = 5): Promise<{
   summary: LearningSummary;
   items: QuickReviewItem[];
-  stats: Record<string, LearningRecord>;
-  queue: Record<string, ReviewQueueEntry>;
 }> {
   const learningState = getLearningStateApi();
   if (!learningState) {
     return {
       summary: buildEmptyLearningSummary(),
       items: [],
-      stats: {},
-      queue: {},
     };
   }
 
@@ -1027,24 +1040,39 @@ async function readQuickReviewState(limit = 5): Promise<{
     REVIEW_QUEUE_STORAGE_KEY,
     LEARNING_SUMMARY_STORAGE_KEY,
   ]);
-  let stats = normalizeLearningStats(payload[LEARNING_WORD_STATS_STORAGE_KEY], learningState);
-  if (!Object.keys(stats).length) {
-    stats = migrateLegacyLearningStats(payload[WORD_STATS_STORAGE_KEY], learningState);
-  }
   const queue = normalizeReviewQueue(payload[REVIEW_QUEUE_STORAGE_KEY], learningState);
+  const rawStats = payload[LEARNING_WORD_STATS_STORAGE_KEY];
+  const hasCurrentStats =
+    rawStats != null &&
+    typeof rawStats === 'object' &&
+    Object.keys(rawStats as Record<string, unknown>).length > 0;
+  const storedSummary = payload[LEARNING_SUMMARY_STORAGE_KEY];
   const summary =
-    payload[LEARNING_SUMMARY_STORAGE_KEY] &&
-    typeof payload[LEARNING_SUMMARY_STORAGE_KEY] === 'object'
-      ? normalizeLearningSummary(payload[LEARNING_SUMMARY_STORAGE_KEY])
+    storedSummary && typeof storedSummary === 'object'
+      ? normalizeLearningSummary(storedSummary)
       : normalizeLearningSummary(
-          learningState.buildLearningSummary ? learningState.buildLearningSummary(stats, queue) : {}
+          learningState.buildLearningSummary
+            ? learningState.buildLearningSummary(
+                hasCurrentStats
+                  ? normalizeLearningStats(rawStats, learningState)
+                  : migrateLegacyLearningStats(payload[WORD_STATS_STORAGE_KEY], learningState),
+                queue
+              )
+            : {}
         );
 
   return {
     summary,
-    items: buildQuickReviewItems(stats, queue, limit),
-    stats,
-    queue,
+    items: buildQuickReviewItems(
+      collectQueuedLearningStats(
+        hasCurrentStats ? rawStats : payload[WORD_STATS_STORAGE_KEY],
+        queue,
+        learningState,
+        !hasCurrentStats
+      ),
+      queue,
+      limit
+    ),
   };
 }
 
@@ -1054,6 +1082,85 @@ export async function readQuickReviewDashboard(limit = 5): Promise<QuickReviewDa
     summary: state.summary,
     items: state.items,
   };
+}
+
+function getEncounteredWordSortKey(entry: unknown): {
+  word: string;
+  hitCount: number;
+  lastSeen: number | null;
+} | null {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+  const source = entry as Record<string, unknown>;
+  const word = String(source.word || '').trim();
+  if (!word) {
+    return null;
+  }
+  const hitCount = Math.max(
+    0,
+    Math.floor(Number(source.hitCount ?? source.exposureCount ?? source.seenCount) || 0)
+  );
+  if (hitCount <= 0) {
+    return null;
+  }
+  return {
+    word,
+    hitCount,
+    lastSeen: normalizeTimestamp(source.lastSeenAt ?? source.lastSeen ?? source.updatedAt) || null,
+  };
+}
+
+// Preserves sortEncounteredWords ordering while only materializing `limit` entries.
+function selectTopEncounteredEntries(
+  rawStats: unknown,
+  sortMode: EncounteredWordSortMode,
+  limit: number
+): unknown[] {
+  if (!rawStats || typeof rawStats !== 'object') {
+    return [];
+  }
+  const mode = sortMode === 'desc' ? 'desc' : 'asc';
+  const safeLimit = Math.max(1, Math.floor(Number(limit) || 6));
+  const best: Array<{
+    entry: unknown;
+    key: NonNullable<ReturnType<typeof getEncounteredWordSortKey>>;
+  }> = [];
+
+  const isBefore = (left: (typeof best)[number], right: (typeof best)[number]): boolean => {
+    if (left.key.hitCount !== right.key.hitCount) {
+      return mode === 'asc'
+        ? left.key.hitCount < right.key.hitCount
+        : left.key.hitCount > right.key.hitCount;
+    }
+    const leftSeen = left.key.lastSeen || 0;
+    const rightSeen = right.key.lastSeen || 0;
+    if (leftSeen !== rightSeen) {
+      return mode === 'asc' ? leftSeen < rightSeen : leftSeen > rightSeen;
+    }
+    return left.key.word.localeCompare(right.key.word) < 0;
+  };
+
+  Object.values(rawStats as Record<string, unknown>).forEach((entry) => {
+    const key = getEncounteredWordSortKey(entry);
+    if (!key) {
+      return;
+    }
+    const candidate = { entry, key };
+    if (best.length >= safeLimit && !isBefore(candidate, best[best.length - 1])) {
+      return;
+    }
+    let index = best.length;
+    while (index > 0 && isBefore(candidate, best[index - 1])) {
+      index -= 1;
+    }
+    best.splice(index, 0, candidate);
+    if (best.length > safeLimit) {
+      best.pop();
+    }
+  });
+
+  return best.map((item) => item.entry);
 }
 
 function normalizeQuickReviewAction(action: QuickReviewAction): string {
@@ -1111,13 +1218,16 @@ export async function submitQuickReviewFeedback(
     // Streak bookkeeping should not block the main review commit path.
     void touchLearningStreak(now);
     const adaptiveApplied = await persistQuickReviewAdaptiveFeedback(normalizedAction, now);
-    const nextStats = normalizeLearningStats(committed.stats, learningState);
     const nextQueue = normalizeReviewQueue(committed.queue, learningState);
     const nextSummary = normalizeLearningSummary(committed.summary);
     return {
       word: String(committed.word || normalizedWord).trim(),
       summary: nextSummary,
-      items: buildQuickReviewItems(nextStats, nextQueue, limit),
+      items: buildQuickReviewItems(
+        collectQueuedLearningStats(committed.stats, nextQueue, learningState, false),
+        nextQueue,
+        limit
+      ),
       adaptiveApplied,
     };
   });
@@ -1143,11 +1253,8 @@ export async function readEncounteredWordRanking(
     WORD_STATS_STORAGE_KEY,
     LEARNING_WORD_STATS_STORAGE_KEY,
   ]);
-  let items = Object.values(
-    payload[WORD_STATS_STORAGE_KEY] && typeof payload[WORD_STATS_STORAGE_KEY] === 'object'
-      ? (payload[WORD_STATS_STORAGE_KEY] as Record<string, unknown>)
-      : {}
-  )
+  const safeLimit = Math.max(1, Math.floor(Number(limit) || 6));
+  let items = selectTopEncounteredEntries(payload[WORD_STATS_STORAGE_KEY], sortMode, safeLimit)
     .map((entry) => normalizeEncounteredWord(entry))
     .filter((item): item is EncounteredWordRankingItem => Boolean(item && item.hitCount > 0));
 
@@ -1158,7 +1265,6 @@ export async function readEncounteredWordRanking(
     );
   }
 
-  const safeLimit = Math.max(1, Math.floor(Number(limit) || 6));
   return sortEncounteredWords(items, sortMode).slice(0, safeLimit);
 }
 
@@ -1702,88 +1808,6 @@ export function subscribeActiveTabSubtitleStatus(
     unsubscribeTabUpdates();
     disconnectCurrentPort();
   };
-}
-
-function sanitizeAnkiField(value: unknown): string {
-  return String(value || '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildAnkiTsv(savedWords: VocabularyWord[]): string {
-  const headers = [
-    'Front',
-    'Back',
-    'Example',
-    'Level',
-    'Phonetic',
-    'SavedAt',
-    'SourceTitle',
-    'SourceUrl',
-    'SourceTime',
-  ];
-  const rows = savedWords.map((word) => [
-    sanitizeAnkiField(word.word),
-    sanitizeAnkiField(word.details?.meaning || ''),
-    sanitizeAnkiField(word.context || ''),
-    sanitizeAnkiField(word.details?.level || ''),
-    sanitizeAnkiField(word.details?.phonetic || ''),
-    word.savedAt ? new Date(word.savedAt).toISOString() : '',
-    sanitizeAnkiField(word.source?.title || ''),
-    sanitizeAnkiField(word.source?.url || ''),
-    sanitizeAnkiField(word.source?.timeLabel || ''),
-  ]);
-  return [headers.join('\t'), ...rows.map((row) => row.join('\t'))].join('\n');
-}
-
-// 生词本导出功能
-export async function exportVocabularyBook(
-  format: VocabularyExportFormat = 'json'
-): Promise<string> {
-  const payload = await readStorage<Record<string, unknown>>([VOCABULARY_BOOK_STORAGE_KEY]);
-  const wordStats = (payload[VOCABULARY_BOOK_STORAGE_KEY] as Record<string, VocabularyWord>) || {};
-
-  const savedWords = Object.values(wordStats)
-    .map((entry) => normalizeVocabularyWord(entry))
-    .filter((word): word is VocabularyWord => Boolean(word && word.status === 'saved'))
-    .sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
-
-  if (format === 'csv') {
-    const headers = [
-      '单词',
-      '释义',
-      '难度等级',
-      '音标',
-      '原句上下文',
-      '来源标题',
-      '来源链接',
-      '来源时间点',
-      '收藏时间',
-      '遇见次数',
-    ];
-    const rows = savedWords.map((word) => [
-      word.word,
-      word.details?.meaning || '',
-      word.details?.level || '',
-      word.details?.phonetic || '',
-      word.context || '',
-      word.source?.title || '',
-      word.source?.url || '',
-      word.source?.timeLabel || '',
-      word.savedAt ? new Date(word.savedAt).toLocaleString() : '',
-      word.exposures || 0,
-    ]);
-    return [
-      headers.join(','),
-      ...rows.map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(',')),
-    ].join('\n');
-  }
-
-  if (format === 'anki') {
-    return buildAnkiTsv(savedWords);
-  }
-
-  return JSON.stringify(savedWords, null, 2);
 }
 
 export async function clearVocabularyBook(): Promise<number> {

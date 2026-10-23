@@ -78,8 +78,6 @@ function getPermissionActionLabel(
 }
 
 interface SiteControlSectionProps {
-  hostname: string;
-  siteRuleEnabled: boolean;
   sitePermission: ActiveTabSitePermissionState;
   siteToggleState: { buttonDisabled: boolean; buttonLabel: string; hint: string };
   siteStatus: { badge: string; tone: 'good' | 'warn'; headline: string; description: string };

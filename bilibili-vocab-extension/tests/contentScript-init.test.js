@@ -48,8 +48,12 @@ function installRuntime(options = {}) {
     loadVocabularyCalls: 0,
     timelineLoadCalls: 0,
     tooltipInitCalls: 0,
+    tooltipDestroyCalls: 0,
     overlayMountCalls: 0,
     translatedElements: [],
+    storageGetCallbacks: [],
+    resolveTranslation: null,
+    renderCalls: 0,
   };
   const subtitleElement = new HarnessElement('系统学习');
 
@@ -102,6 +106,10 @@ function installRuntime(options = {}) {
           if (options.storageThrows) {
             throw new Error('storage unavailable');
           }
+          if (options.deferStorageRead) {
+            state.storageGetCallbacks.push(callback);
+            return;
+          }
           callback(options.storedSettings || {});
         },
         set() {},
@@ -142,6 +150,15 @@ function installRuntime(options = {}) {
   };
   global.SubtitleTranslator = {
     async processSubtitle(text) {
+      if (options.deferTranslation) {
+        return new Promise((resolve) => {
+          state.resolveTranslation = () =>
+            resolve({
+              mixedText: `translated:${text}`,
+              tokens: [{ type: 'word', word: 'system' }],
+            });
+        });
+      }
       return {
         mixedText: `translated:${text}`,
         tokens: [{ type: 'word', word: 'system' }],
@@ -156,6 +173,7 @@ function installRuntime(options = {}) {
   };
   global.SubtitleRenderer = {
     renderSubtitleElement(element, result) {
+      state.renderCalls += 1;
       element.dataset.renderedMixedText = result.mixedText;
       state.translatedElements.push(element);
       return true;
@@ -175,6 +193,9 @@ function installRuntime(options = {}) {
     init() {
       state.tooltipInitCalls += 1;
     },
+    destroy() {
+      state.tooltipDestroyCalls += 1;
+    },
   };
   global.SchedulerModule = {
     startEngine() {},
@@ -183,6 +204,7 @@ function installRuntime(options = {}) {
   };
   global.DanmakuModule = {
     clearDanmaku() {},
+    destroy() {},
     setSpeedPreset() {},
     initDanmakuContainer() {},
   };
@@ -219,6 +241,55 @@ test('contentScript init: normal boot should register observer and listeners onc
   assert.equal(harness.state.loadVocabularyCalls, 1);
   assert.equal(harness.state.timelineLoadCalls, 1);
   assert.equal(harness.state.tooltipInitCalls, 1);
+});
+
+test('contentScript lifecycle: teardown before DOMContentLoaded must not re-register runtime', async () => {
+  const harness = loadContentScript();
+
+  harness.contentScript.teardownContentRuntime();
+  assert.equal(typeof harness.state.domContentLoadedListener, 'function');
+
+  harness.state.domContentLoadedListener();
+  await wait(50);
+
+  assert.equal(harness.state.tooltipInitCalls, 0);
+  assert.equal(harness.state.observerObserveCalls, 0);
+  assert.equal(harness.state.storageListeners, 0);
+  assert.equal(harness.state.tooltipDestroyCalls, 1);
+});
+
+test('contentScript lifecycle: teardown during an in-flight init must abort remaining boot steps', async () => {
+  const harness = loadContentScript({ deferStorageRead: true });
+
+  assert.equal(typeof harness.state.domContentLoadedListener, 'function');
+  harness.state.domContentLoadedListener();
+  await wait(50);
+
+  assert.equal(harness.state.storageGetCallbacks.length, 1);
+  harness.contentScript.teardownContentRuntime();
+
+  harness.state.storageGetCallbacks[0]({});
+  await wait(50);
+
+  assert.equal(harness.state.tooltipInitCalls, 0);
+  assert.equal(harness.state.observerObserveCalls, 0);
+  assert.equal(harness.state.storageListeners, 0);
+});
+
+test('contentScript lifecycle: teardown invalidates an in-flight translation render', async () => {
+  const harness = loadContentScript({ deferTranslation: true });
+  const element = new HarnessElement('系统学习');
+
+  const pending = harness.contentScript.applyTranslation(element, '系统学习');
+  await wait(20);
+
+  harness.contentScript.teardownContentRuntime();
+  harness.state.resolveTranslation();
+  await pending;
+
+  assert.equal(harness.state.renderCalls, 0);
+  assert.equal('biliVocabOriginalText' in element.dataset, false);
+  assert.equal('biliVocabRenderSignature' in element.dataset, false);
 });
 
 test('contentScript init: overlay load failure should keep subtitle processing usable', async () => {

@@ -440,3 +440,87 @@ test('shootWordDanmaku: should keep tracks above the subtitle area', () => {
     danmaku.clearDanmaku();
   }
 });
+
+test('destroy: should disconnect a host observer that is still waiting for the player', () => {
+  const originalDocument = global.document;
+  const originalMutationObserver = global.MutationObserver;
+  const observerState = { observed: 0, disconnected: 0 };
+
+  global.MutationObserver = class TrackingMutationObserver {
+    observe() {
+      observerState.observed += 1;
+    }
+
+    disconnect() {
+      observerState.disconnected += 1;
+    }
+  };
+  global.document = {
+    documentElement: new MockElement('html'),
+    createElement(tagName) {
+      return new MockElement(tagName);
+    },
+    querySelector() {
+      return null;
+    },
+  };
+
+  try {
+    assert.equal(danmaku.initDanmakuContainer(), null);
+    assert.equal(observerState.observed, 1);
+    assert.equal(observerState.disconnected, 0);
+
+    danmaku.destroy();
+
+    assert.equal(observerState.disconnected, 1);
+  } finally {
+    global.document = originalDocument;
+    global.MutationObserver = originalMutationObserver;
+  }
+});
+
+test('destroy: should remove the mounted container and allow a fresh mount', () => {
+  danmaku.destroy();
+
+  const container = danmaku.initDanmakuContainer();
+  assert.ok(container instanceof MockElement);
+  assert.equal(host.children.length, 1);
+
+  danmaku.destroy();
+
+  assert.equal(container.parentElement, null);
+  assert.equal(host.children.length, 0);
+
+  const remounted = danmaku.initDanmakuContainer();
+  assert.ok(remounted instanceof MockElement);
+  assert.notEqual(remounted, container);
+  assert.equal(host.children.length, 1);
+});
+
+test('clearDanmaku: should clear pending fallback cleanup timers', () => {
+  const originalSetTimeout = global.setTimeout;
+  const originalClearTimeout = global.clearTimeout;
+  const pending = new Set();
+
+  global.setTimeout = (callback) => {
+    const handle = { callback };
+    pending.add(handle);
+    return handle;
+  };
+  global.clearTimeout = (handle) => {
+    pending.delete(handle);
+  };
+
+  try {
+    danmaku.destroy();
+    assert.equal(danmaku.shootWordDanmaku({ word: 'timer', translation: '测试' }), true);
+    assert.equal(pending.size, 1);
+
+    danmaku.clearDanmaku();
+    assert.equal(pending.size, 0);
+  } finally {
+    global.setTimeout = originalSetTimeout;
+    global.clearTimeout = originalClearTimeout;
+    danmaku.destroy();
+  }
+});

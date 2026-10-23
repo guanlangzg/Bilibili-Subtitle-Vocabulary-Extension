@@ -19,14 +19,15 @@ const DEFAULT_MAX_ZIP_SIZE_KB = 3500;
 const DEFAULT_MAX_UNPACKED_SIZE_KB = 19000;
 const DEFAULT_MAX_ENTRY_COUNT = 80;
 const REQUIRED_STATIC_PACKAGE_ENTRIES = ['manifest.json'];
+// In-memory manifest checks lack built HTML; normal packaging derives these paths from it.
 const ALLOWED_DIST_PACKAGE_ENTRIES = [
   'dist/options.html',
   'dist/popup.html',
   'dist/overlay.js',
   'dist/assets/options.js',
   'dist/assets/popup.js',
-  'dist/assets/study-preview-chunk.js',
-  'dist/assets/study-preview.css',
+  'dist/assets/use-undo-action-chunk.js',
+  'dist/assets/use-undo-action.css',
 ];
 const ALLOWED_DATA_PACKAGE_ENTRIES = collectPublishedDataPackageEntries();
 const FORBIDDEN_PACKAGE_ENTRIES = [

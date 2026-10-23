@@ -342,8 +342,6 @@ function PopupApp() {
       </header>
 
       <SiteControlSection
-        hostname={hostname}
-        siteRuleEnabled={siteRuleEnabled}
         sitePermission={sitePermission}
         siteToggleState={siteToggleState}
         siteStatus={siteStatus}
