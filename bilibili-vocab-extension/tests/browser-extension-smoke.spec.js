@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { chromium } = require('playwright-core');
+const { collectManifestPackEntries } = require('../scripts/pack-extension.js');
 const {
   createTempRoot,
   ensureExtensionBuildExists,
@@ -30,23 +31,6 @@ function getManifestContentScriptEntry(rootDir) {
   return contentScripts.find((entry) => Array.isArray(entry.js)) || null;
 }
 
-function collectRuntimeCopyEntries(rootDir) {
-  const manifest = readManifest(rootDir);
-  const entries = ['manifest.json', 'dist', 'data'];
-
-  if (manifest.background && typeof manifest.background.service_worker === 'string') {
-    entries.push(manifest.background.service_worker);
-  }
-
-  const contentScripts = Array.isArray(manifest.content_scripts) ? manifest.content_scripts : [];
-  contentScripts.forEach((entry) => {
-    (entry.js || []).forEach((file) => entries.push(file));
-    (entry.css || []).forEach((file) => entries.push(file));
-  });
-
-  return [...new Set(entries)];
-}
-
 function getContentRuntimeScriptFiles(rootDir) {
   const entry = getManifestContentScriptEntry(rootDir);
   return entry && Array.isArray(entry.js) ? entry.js.slice() : [];
@@ -67,7 +51,7 @@ function copyEntryToExtensionRoot(sourceRoot, targetRoot, entryPath) {
 function createPreauthorizedExtensionCopy(originPattern) {
   // Why: browser-level optional permission prompts are not automatable in Playwright.
   const extensionRoot = createTempRoot('bili-vocab-authorized-extension-');
-  const entries = collectRuntimeCopyEntries(PROJECT_ROOT);
+  const entries = collectManifestPackEntries(PROJECT_ROOT);
   entries.forEach((entryPath) => copyEntryToExtensionRoot(PROJECT_ROOT, extensionRoot, entryPath));
 
   const manifest = readManifest(extensionRoot);
@@ -447,6 +431,21 @@ test('browser extension smoke: should inject shipped content runtime on an autho
     const helperPage = await context.newPage();
     await helperPage.goto(`chrome-extension://${extensionId}/dist/popup.html`);
     await helperPage.waitForLoadState('domcontentloaded');
+
+    await helperPage.evaluate(async () => {
+      const settingsKey = 'bili_vocab_settings_v3';
+      const stored = await chrome.storage.local.get(settingsKey);
+      const settings = stored[settingsKey];
+      if (!settings || !settings.globalControls) {
+        throw new Error('Default extension settings have not initialized.');
+      }
+      await chrome.storage.local.set({
+        [settingsKey]: {
+          ...settings,
+          globalControls: { ...settings.globalControls, webPageEnabled: true },
+        },
+      });
+    });
 
     const injectedTabId = await injectContentRuntimeIntoOptionalHost(helperPage);
     assert.equal(typeof injectedTabId, 'number');

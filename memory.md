@@ -241,4 +241,5 @@ CEDICT 用 `/` 分义项、用 `;` 分同一义项的不同说法:`电影 → /m
 - **弹窗学习概览**：已有后台摘要时只需归一化复习队列引用的词；摘要缺失仍需全量重建，v1 legacy 回退也要测。概览/排行当前仍是两次 storage.get，一个订阅监听器不代表一次读取。
 - **销毁必须覆盖在途异步**：清理监听器/定时器之外，init 每个 await 后与动画帧任务内都需检查停用状态；teardown 推进 renderGeneration 阻止已发出的翻译结果落地。弹幕播放器尚未出现时的宿主 MutationObserver 和备用 cleanup timers 也要清理，并测试再次挂载。
 - **IAB 隔离页前置条件**：overlay 除 SharedSettings、chrome.storage/onChanged 外，还依赖真实 `subtitleNavigation.js` 全局；缺失会报 `Missing subtitle navigation runtime` 并使 React root 空白。当前无人值守会话 IAB 可报告 visibility=hidden，requestAnimationFrame 被节流、原生 click 超时；DOM/样式观察、纯匹配与存储通知测试仍可用，不得冒充真实站点自动处理或点击链路通过。
+- **授权站点冒烟需显式开启正文模式**：`webPageEnabled` 默认关闭，给主机预授权不等于启用正文替换。`browser-extension-smoke.spec.js` 的 optional-host 用例注入前须在 v3 `globalControls` 开启正文模式；扩展副本复用 `collectManifestPackEntries`，避免漏掉 `background.js` 的 importScripts 依赖。若 `.bsv-word` 超时，先核对这两项，不要改产品默认值或盲目增加等待。
 - **审查边界**：后台完整日志投影/整包写入及同步占用共享写队列仍是结构性瓶颈，不能为性能直接裁剪事实日志；裁剪需先设计跨端幂等与基线压缩。带源码位置的剩余发现见 `docs/2026-10-23-全量代码审查与优化.md`。
