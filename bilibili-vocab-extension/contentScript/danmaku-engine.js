@@ -206,6 +206,11 @@
       stopReviewEngine(true);
       unbindVideoPlaybackEvents(getBoundVideo());
       setBoundVideo(null);
+      if (hasMethod(globalThis.DanmakuModule, 'destroy')) {
+        globalThis.DanmakuModule.destroy();
+      } else if (hasMethod(globalThis.DanmakuModule, 'clearDanmaku')) {
+        globalThis.DanmakuModule.clearDanmaku();
+      }
     }
 
     return {

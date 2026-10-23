@@ -91,7 +91,7 @@ interface ToggleRowProps {
   onChange: (checked: boolean) => void;
 }
 
-export function ToggleRow({ title, description, checked, onChange }: ToggleRowProps) {
+function ToggleRow({ title, description, checked, onChange }: ToggleRowProps) {
   return (
     <label className="switch-row">
       <span>
@@ -509,7 +509,6 @@ export function LearningStrategySection({
 }
 
 interface SitesManagementSectionProps {
-  working: SettingsV3;
   siteRules: Array<[string, { enabled: boolean }]>;
   newSite: string;
   setNewSite: (value: string) => void;

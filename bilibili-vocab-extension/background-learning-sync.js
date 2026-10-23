@@ -13,7 +13,6 @@
   const getStoragePayload = backgroundStorage && backgroundStorage.getStoragePayload;
   const writeStoragePayload = backgroundStorage && backgroundStorage.writeStoragePayload;
   const normalizeTimestamp = backgroundStorage && backgroundStorage.normalizeTimestamp;
-  const logBackgroundError = backgroundStorage && backgroundStorage.logBackgroundError;
 
   function requireModules() {
     if (!learningDataSync) throw new Error('LearningDataSync unavailable');
@@ -34,8 +33,19 @@
     const payload = messagePayload && typeof messagePayload === 'object' ? messagePayload : {};
     const next = learningDataSync.normalizeSyncSettings(payload.settings);
     // Validate before persisting so a bad URL or token never reaches storage.
-    if (next.serverUrl) learningDataSync.normalizeServerUrl(next.serverUrl);
+    if (next.serverUrl) next.serverUrl = learningDataSync.normalizeServerUrl(next.serverUrl);
     if (next.token) learningDataSync.normalizeToken(next.token);
+    const previous = await readSyncSettings();
+    const previousServerUrl = previous.serverUrl
+      ? learningDataSync.normalizeServerUrl(previous.serverUrl)
+      : '';
+    const connectionChanged = next.serverUrl !== previousServerUrl || next.token !== previous.token;
+    Object.assign(next, {
+      lastCursor: connectionChanged ? 0 : previous.lastCursor,
+      lastSyncedAt: connectionChanged ? null : previous.lastSyncedAt,
+      lastError: connectionChanged ? null : previous.lastError,
+      lastResult: connectionChanged ? null : previous.lastResult,
+    });
     await writeStoragePayload({ [learningDataSync.SYNC_SETTINGS_KEY]: next });
     return next;
   }
@@ -132,7 +142,6 @@
     }
     const now =
       (typeof normalizeTimestamp === 'function' && normalizeTimestamp(payload.now)) || Date.now();
-    const query = clientQuery(settings);
 
     const summary = {
       pulledEvents: 0,
@@ -143,29 +152,41 @@
       duplicates: 0,
       cursor: settings.lastCursor,
       pages: 0,
+      hasMore: false,
       syncedAt: now,
     };
 
     let cursor = settings.lastCursor;
-    let importedAny = false;
+    const pulled = { events: [], baselines: [] };
     for (let page = 0; page < learningDataSync.MAX_PULL_PAGES; page += 1) {
       const params = new URLSearchParams({ since: String(cursor), limit: '500' });
       if (settings.clientId) params.set('clientId', settings.clientId);
       const response = await requestJson(settings, 'GET', `/v1/pull?${params.toString()}`, null);
-      summary.pages += 1;
-
-      if (response.events.length > 0 || response.baselines.length > 0) {
-        const bundle = learningDataSync.toBundle(response, now);
-        await backgroundLearningState.importLearningData({ bundle, now });
-        importedAny = true;
-        summary.pulledEvents += response.events.length;
-        summary.pulledBaselines += response.baselines.length;
+      if (
+        !response ||
+        !Array.isArray(response.events) ||
+        !Array.isArray(response.baselines) ||
+        !Number.isSafeInteger(response.cursor) ||
+        response.cursor < cursor ||
+        typeof response.hasMore !== 'boolean' ||
+        (response.hasMore && response.cursor === cursor)
+      ) {
+        throw new Error('同步服务器返回了无效的分页结果');
       }
-
-      cursor = Number.isSafeInteger(response.cursor) ? response.cursor : cursor;
+      summary.pages += 1;
+      pulled.events.push(...response.events);
+      pulled.baselines.push(...response.baselines);
+      cursor = response.cursor;
+      summary.hasMore = response.hasMore;
       if (!response.hasMore) break;
     }
-    summary.imported = importedAny;
+    summary.pulledEvents = pulled.events.length;
+    summary.pulledBaselines = pulled.baselines.length;
+    if (pulled.events.length > 0 || pulled.baselines.length > 0) {
+      const bundle = learningDataSync.toBundle(pulled, now);
+      await backgroundLearningState.importLearningData({ bundle, now });
+      summary.imported = true;
+    }
 
     // Push the merged local bundle; duplicates are expected and counted, not an error.
     const exported = await backgroundLearningState.exportLearningData({ now });
@@ -177,7 +198,8 @@
     summary.acceptedEvents = pushed.accepted.events;
     summary.acceptedBaselines = pushed.accepted.baselines;
     summary.duplicates = pushed.duplicates;
-    summary.cursor = Number.isSafeInteger(pushed.cursor) ? pushed.cursor : cursor;
+    // The push cursor can include records from other devices that we have not pulled.
+    summary.cursor = cursor;
     summary.deviceId = exported.deviceId;
 
     const nextSettings = {
@@ -191,26 +213,11 @@
     return { ...summary, settings: nextSettings };
   }
 
-  async function recordSyncFailure(error) {
-    const settings = await readSyncSettings();
-    const message = learningDataSync.describeFailure(error);
-    const next = { ...settings, lastError: message };
-    try {
-      await writeStoragePayload({ [learningDataSync.SYNC_SETTINGS_KEY]: next });
-    } catch (storageError) {
-      if (typeof logBackgroundError === 'function') {
-        logBackgroundError('Failed to persist sync error', storageError);
-      }
-    }
-    return message;
-  }
-
   const api = {
     readSyncSettings,
     saveSyncSettings,
     readStatus,
     syncNow,
-    recordSyncFailure,
   };
 
   globalScope.BackgroundLearningSync = api;

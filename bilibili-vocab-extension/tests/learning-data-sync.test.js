@@ -72,7 +72,7 @@ test('settings normalization keeps defaults and drops invalid cursors', () => {
   });
   assert.equal(normalized.enabled, false);
   assert.equal(normalized.serverUrl, 'https://a.example.com');
-  assert.equal(normalized.token, 'vsc_x');
+  assert.equal(normalized.token, ' vsc_x ');
   assert.equal(normalized.lastCursor, 0);
   assert.equal(normalized.lastSyncedAt, null);
   assert.equal(Sync.isConfigured(normalized), true);
@@ -127,6 +127,56 @@ test('saveSyncSettings validates before writing', async () => {
     /http/
   );
   assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY], undefined);
+});
+
+test('saveSyncSettings rejects token whitespace without changing saved settings', async () => {
+  const token = `vsc_${'a'.repeat(32)}`;
+  const original = { serverUrl: 'https://sync.example.com', token, lastCursor: 7 };
+  const stub = createChromeStub({ [Sync.SYNC_SETTINGS_KEY]: original });
+  const sync = loadBackgroundModules(stub);
+  for (const invalidToken of [` ${token}`, `${token} `, `\t${token}\n`, '   ']) {
+    await assert.rejects(
+      () => sync.saveSyncSettings({ settings: { ...original, token: invalidToken } }),
+      /格式不正确/
+    );
+    assert.deepEqual(stub.store[Sync.SYNC_SETTINGS_KEY], original);
+  }
+});
+
+test('changing the server or token resets sync progress, while client edits preserve it', async () => {
+  const token = `vsc_${'d'.repeat(32)}`;
+  const original = {
+    serverUrl: 'https://sync.example.com/',
+    token,
+    clientId: 'old-device',
+    lastCursor: 40,
+    lastSyncedAt: 123,
+    lastError: 'old error',
+    lastResult: 'old result',
+  };
+  const stub = createChromeStub({ [Sync.SYNC_SETTINGS_KEY]: original });
+  const sync = loadBackgroundModules(stub);
+  const preserved = await sync.saveSyncSettings({
+    settings: {
+      ...original,
+      serverUrl: 'https://sync.example.com',
+      clientId: 'new-device',
+      lastCursor: 1,
+    },
+  });
+  assert.equal(preserved.lastCursor, 40);
+  assert.equal(preserved.lastSyncedAt, 123);
+  assert.equal(preserved.clientId, 'new-device');
+  for (const changed of [
+    { serverUrl: 'https://other.example.com' },
+    { serverUrl: 'https://other.example.com', token: `vsc_${'e'.repeat(32)}` },
+  ]) {
+    const result = await sync.saveSyncSettings({ settings: { ...preserved, ...changed } });
+    assert.equal(result.lastCursor, 0);
+    assert.equal(result.lastSyncedAt, null);
+    assert.equal(result.lastError, null);
+    assert.equal(result.lastResult, null);
+  }
 });
 
 test('syncNow pulls first, imports, then pushes the merged bundle', async () => {
@@ -218,6 +268,137 @@ test('syncNow surfaces a conflict and does not advance the cursor', async () => 
   await assert.rejects(() => sync.syncNow({ now: 1 }), /409/);
   assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY].lastCursor, 3);
   delete global.fetch;
+});
+
+test('syncNow imports all pulled pages once and never acknowledges unseen remote records', async () => {
+  const stub = createChromeStub({
+    [Sync.SYNC_SETTINGS_KEY]: {
+      serverUrl: 'https://sync.example.com',
+      token: `vsc_${'f'.repeat(32)}`,
+    },
+  });
+  const sync = loadBackgroundModules(stub);
+  const state = global.BackgroundLearningState;
+  const importData = state.importLearningData;
+  let imports = 0;
+  let pulls = 0;
+  state.importLearningData = async (payload) => {
+    imports += 1;
+    return importData(payload);
+  };
+  global.fetch = async (_url, init) => {
+    const response =
+      init.method === 'GET'
+        ? {
+            cursor: ++pulls,
+            hasMore: pulls === 1,
+            events: [{ seq: pulls, body: FIXTURE.events[pulls - 1] }],
+            baselines: [],
+          }
+        : { accepted: { events: 0, baselines: 0 }, duplicates: 2, cursor: 9, ackSeq: 9 };
+    return { ok: true, status: 200, text: async () => JSON.stringify(response) };
+  };
+  try {
+    const first = await sync.syncNow({ now: 1767225603000 });
+    assert.equal(imports, 1);
+    assert.equal(first.pulledEvents, 2);
+    assert.equal(first.pages, 2);
+    assert.equal(first.hasMore, false);
+    assert.equal(first.cursor, 2);
+    assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY].lastCursor, 2);
+    let nextSince;
+    global.fetch = async (url, init) => {
+      if (init.method === 'GET') nextSince = new URL(url).searchParams.get('since');
+      const response =
+        init.method === 'GET'
+          ? { cursor: 9, hasMore: false, events: [], baselines: [] }
+          : { accepted: { events: 0, baselines: 0 }, duplicates: 2, cursor: 10 };
+      return { ok: true, status: 200, text: async () => JSON.stringify(response) };
+    };
+    const next = await sync.syncNow({ now: 1767225604000 });
+    assert.equal(nextSince, '2');
+    assert.equal(next.cursor, 9);
+    assert.equal(imports, 1);
+  } finally {
+    state.importLearningData = importData;
+  }
+});
+
+test('syncNow preserves the last pulled cursor when the page limit is reached', async () => {
+  const stub = createChromeStub({
+    [Sync.SYNC_SETTINGS_KEY]: {
+      serverUrl: 'https://sync.example.com',
+      token: `vsc_${'g'.repeat(32)}`,
+    },
+  });
+  const sync = loadBackgroundModules(stub);
+  let pulls = 0;
+  global.fetch = async (_url, init) => {
+    const response =
+      init.method === 'GET'
+        ? { cursor: ++pulls, hasMore: true, events: [], baselines: [] }
+        : { accepted: { events: 0, baselines: 0 }, duplicates: 0, cursor: 9999 };
+    return { ok: true, status: 200, text: async () => JSON.stringify(response) };
+  };
+  const result = await sync.syncNow({ now: 1 });
+  assert.equal(pulls, Sync.MAX_PULL_PAGES);
+  assert.equal(result.hasMore, true);
+  assert.equal(result.cursor, Sync.MAX_PULL_PAGES);
+  assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY].lastCursor, Sync.MAX_PULL_PAGES);
+});
+
+test('syncNow rejects stalled pagination before importing or advancing the cursor', async () => {
+  const stub = createChromeStub({
+    [Sync.SYNC_SETTINGS_KEY]: {
+      serverUrl: 'https://sync.example.com',
+      token: `vsc_${'h'.repeat(32)}`,
+      lastCursor: 3,
+    },
+  });
+  const sync = loadBackgroundModules(stub);
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ cursor: 3, hasMore: true, events: [], baselines: [] }),
+  });
+  await assert.rejects(() => sync.syncNow({ now: 1 }), /无效的分页结果/);
+  assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY].lastCursor, 3);
+  assert.equal(stub.store[LearningData.STORAGE_KEY], undefined);
+});
+
+test('syncNow leaves the entire pull batch uncommitted when a later page conflicts', async () => {
+  const stub = createChromeStub({
+    [Sync.SYNC_SETTINGS_KEY]: {
+      serverUrl: 'https://sync.example.com',
+      token: `vsc_${'i'.repeat(32)}`,
+      lastCursor: 3,
+    },
+  });
+  const sync = loadBackgroundModules(stub);
+  let pulls = 0;
+  global.fetch = async (_url, init) => {
+    assert.equal(init.method, 'GET');
+    pulls += 1;
+    const body =
+      pulls === 1
+        ? FIXTURE.events[0]
+        : { ...FIXTURE.events[0], occurredAt: FIXTURE.events[0].occurredAt + 1 };
+    return {
+      ok: true,
+      status: 200,
+      text: async () =>
+        JSON.stringify({
+          cursor: 3 + pulls,
+          hasMore: pulls === 1,
+          events: [{ seq: 3 + pulls, body }],
+          baselines: [],
+        }),
+    };
+  };
+  await assert.rejects(() => sync.syncNow({ now: 1767225603000 }), /Conflicting eventId/);
+  assert.equal(pulls, 2);
+  assert.equal(stub.store[Sync.SYNC_SETTINGS_KEY].lastCursor, 3);
+  assert.equal(stub.store[LearningData.STORAGE_KEY], undefined);
 });
 
 test('readStatus reports unconfigured settings without network access', async () => {

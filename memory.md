@@ -231,3 +231,14 @@ CEDICT 用 `/` 分义项、用 `;` 分同一义项的不同说法:`电影 → /m
 - lint / typecheck 通过；test 551/551；test:ui 56/56；build:extension 通过（overlay 270.92KB / 65.22KB gzip）
 - 同步单测 `tests/learning-data-sync.test.js` 10/10
 - 星愿浏览器完整 E2E 两轮（含一次干净账号）全部通过
+
+## 2026-10-23 全量审查：性能与验证方法
+
+- **删 API 后追踪专用计算链**：`vocabulary.getLearningSummary` 删除后，其内部摘要缓存与 `recordHit → buildLearningSummary` 仍长期运行但无人读取。判断死计算要从结果消费者反查，不能只看辅助函数有没有调用。曝光回包同理：页面只需要确认，勿把整份 stats/queue/progress/journal 跨消息边界回传；收藏/复习调用方仍读取 stats/queue，不能一并裁掉。
+- **词库索引更新口径**：建桶使用 `matchTerms`（curated aliases），更新学习记录也必须更新这些桶，不能沿用 `meaningTerms`。回归需用“别名不在 meaning 中”的词条，普通 mock 会漏掉旧对象问题。跨等级更新时保留 `wordIndex` 原先选定的等级对象；记录刷新无需重建固定文本索引。
+- **同步游标只确认已拉取的记录**：push 返回的是服务器全局最新游标，可能包含本轮尚未拉取的其他设备事件，不能作为下一轮 since。分页循环后一次 import，校验失败整批不写；到上限返回 hasMore。更换服务器/令牌应重置本地游标，编辑 clientId 或末尾斜杠不应重置；同一连接保存不得用页面旧快照覆盖后台最新游标。令牌在设置归一化阶段也不能 trim。
+- **性能基准口径**：用 `git show HEAD:<文件>` 与当前文件在同一进程/同一输入下 A/B，预热后取中位数；同时计消息字节、写入次数/字节和归一化次数。存储桩保留 JSON 复制以暴露大对象成本，但不能把桩耗时称作已安装扩展端到端延迟。真实 DOM 的探测基准要对比检测结果和 closest 次数，不能拿 mock DOM 耗时当渲染证据。
+- **弹窗学习概览**：已有后台摘要时只需归一化复习队列引用的词；摘要缺失仍需全量重建，v1 legacy 回退也要测。概览/排行当前仍是两次 storage.get，一个订阅监听器不代表一次读取。
+- **销毁必须覆盖在途异步**：清理监听器/定时器之外，init 每个 await 后与动画帧任务内都需检查停用状态；teardown 推进 renderGeneration 阻止已发出的翻译结果落地。弹幕播放器尚未出现时的宿主 MutationObserver 和备用 cleanup timers 也要清理，并测试再次挂载。
+- **IAB 隔离页前置条件**：overlay 除 SharedSettings、chrome.storage/onChanged 外，还依赖真实 `subtitleNavigation.js` 全局；缺失会报 `Missing subtitle navigation runtime` 并使 React root 空白。当前无人值守会话 IAB 可报告 visibility=hidden，requestAnimationFrame 被节流、原生 click 超时；DOM/样式观察、纯匹配与存储通知测试仍可用，不得冒充真实站点自动处理或点击链路通过。
+- **审查边界**：后台完整日志投影/整包写入及同步占用共享写队列仍是结构性瓶颈，不能为性能直接裁剪事实日志；裁剪需先设计跨端幂等与基线压缩。带源码位置的剩余发现见 `docs/2026-10-23-全量代码审查与优化.md`。

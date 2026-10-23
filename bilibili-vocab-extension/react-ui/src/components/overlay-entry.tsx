@@ -88,9 +88,27 @@ function getReviewDensityLabel(density: ProfileConfig['reviewDanmakuDensity']): 
   return '标准';
 }
 
+const LEARNING_STATUS_LABELS: Record<string, string> = {
+  unseen: '未巩固',
+  new: '未巩固',
+  seen: '已遇见',
+  learning: '已遇见',
+  reviewing: '已遇见',
+  saved: '已收藏',
+  mastered: '已掌握',
+  skipped: '已跳过',
+};
+
+function getLearningStatusLabel(status: string | undefined): string {
+  const normalized = String(status || '')
+    .trim()
+    .toLowerCase();
+  return LEARNING_STATUS_LABELS[normalized] || '';
+}
+
 function getRecentWordMeta(item: LearningSummary['recentWords'][number]): string {
-  const parts = [item.translation, item.status].filter(Boolean);
-  return parts.length ? parts.join(' · ') : '继续观看后会补齐释义和状态';
+  const statusLabel = getLearningStatusLabel(item.status);
+  return statusLabel || '继续观看后会补齐学习状态';
 }
 
 function readVideoElement(): HTMLVideoElement | null {
@@ -366,15 +384,17 @@ function OverlayApp() {
 
   if (overlayState.hidden) {
     return (
-      <button
-        type="button"
-        className="bsv-fab"
-        aria-label="打开学习面板"
-        onClick={() => void showOverlay()}
-      >
-        <BookIcon size={14} />
-        打开学习面板
-      </button>
+      <div className="bsv-overlay-root" data-theme={resolvedTheme}>
+        <button
+          type="button"
+          className="bsv-fab"
+          aria-label="打开学习面板"
+          onClick={() => void showOverlay()}
+        >
+          <BookIcon size={14} />
+          打开学习面板
+        </button>
+      </div>
     );
   }
 
@@ -459,10 +479,7 @@ function OverlayApp() {
                 {summary.recentWords.length > 0 ? (
                   <div className="bsv-recent-words__list">
                     {summary.recentWords.slice(0, 3).map((item) => (
-                      <div
-                        className="bsv-recent-word"
-                        key={`${item.word}-${item.translation || ''}`}
-                      >
+                      <div className="bsv-recent-word" key={item.word}>
                         <strong>{item.word}</strong>
                         <span>{getRecentWordMeta(item)}</span>
                       </div>

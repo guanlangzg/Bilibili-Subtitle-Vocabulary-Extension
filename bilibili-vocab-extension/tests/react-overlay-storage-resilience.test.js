@@ -386,7 +386,6 @@ test('react overlay storage resilience: subscribeLearningSummary should normaliz
       recentWords: [
         {
           word: 'lexicon',
-          translation: '词汇',
           status: 'saved',
         },
       ],

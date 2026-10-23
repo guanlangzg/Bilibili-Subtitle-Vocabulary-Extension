@@ -25,6 +25,7 @@ function createHarness(options = {}) {
   const state = {
     getCurrentSubtitleItemsCalls: 0,
     processSubtitleCalls: 0,
+    primaryElementCalls: 0,
     observeTargets: [],
   };
   const subtitleItems = options.subtitleItems || [
@@ -113,9 +114,10 @@ function createHarness(options = {}) {
       return [];
     },
     getSubtitleFromTimelineAtCurrentTime() {
-      return '';
+      return options.fallbackText || '';
     },
     getPrimarySubtitleElement() {
+      state.primaryElementCalls += 1;
       return null;
     },
     extractSubtitleText(element) {
@@ -179,6 +181,7 @@ function createHarness(options = {}) {
     await wait(220);
     state.getCurrentSubtitleItemsCalls = 0;
     state.processSubtitleCalls = 0;
+    state.primaryElementCalls = 0;
   }
 
   function triggerMutation(times = 1) {
@@ -256,6 +259,58 @@ test('contentScript observer throttle: should stay quiet on pages without subtit
 
   assert.equal(harness.state.getCurrentSubtitleItemsCalls, 1);
   assert.equal(harness.state.processSubtitleCalls, 0);
+});
+
+test('contentScript observer throttle: should skip the primary element probe when the timeline has no text', async () => {
+  const harness = createHarness({ subtitleItems: [] });
+  await harness.boot();
+
+  harness.triggerMutation(1);
+  await wait(50);
+
+  assert.equal(harness.state.getCurrentSubtitleItemsCalls, 1);
+  assert.equal(harness.state.primaryElementCalls, 0);
+});
+
+test('contentScript observer throttle: should still probe the primary element when the timeline has text', async () => {
+  const harness = createHarness({ subtitleItems: [], fallbackText: '时间轴字幕' });
+  await harness.boot();
+
+  harness.triggerMutation(1);
+  await wait(50);
+
+  assert.equal(harness.state.primaryElementCalls, 1);
+});
+
+test('contentScript lifecycle: a destroyed frame batch must not restore page elements', async () => {
+  const { createDomObserver } = require('../contentScript/dom-observer.js');
+  const frameCallbacks = [];
+  const restore = global.SubtitleRenderer;
+  const parser = global.SubtitleParser;
+  const frame = global.requestAnimationFrame;
+  let restores = 0;
+  global.SubtitleParser = {
+    getCurrentSubtitleItems: () => [{ element: {}, text: '原文', mode: 'page' }],
+  };
+  global.SubtitleRenderer = { restoreSubtitleElement: () => restores++ };
+  global.requestAnimationFrame = (callback) => frameCallbacks.push(callback);
+  const observer = createDomObserver({
+    getSettings: () => ({ webPageEnabled: false }),
+    isCurrentSiteEnabled: () => true,
+  });
+  try {
+    const pending = observer.processSubtitles();
+    assert.equal(frameCallbacks.length, 1);
+    observer.destroy();
+    frameCallbacks[0]();
+    await pending;
+    assert.equal(restores, 0);
+  } finally {
+    observer.destroy();
+    global.SubtitleRenderer = restore;
+    global.SubtitleParser = parser;
+    global.requestAnimationFrame = frame;
+  }
 });
 
 test.after(() => {

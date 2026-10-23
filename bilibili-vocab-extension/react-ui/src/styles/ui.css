@@ -201,10 +201,6 @@ body.v3-page[data-bsv-theme="dark"] {
   gap: 0.65rem;
 }
 
-.study-preview--compact {
-  gap: 0.5rem;
-}
-
 .preview-metrics-grid,
 .scene-preset-grid {
   display: grid;
@@ -1102,10 +1098,6 @@ body.v3-page[data-bsv-theme="dark"] {
   gap: 0.4rem;
 }
 
-.shortcut-guide__list--compact {
-  gap: 0.35rem;
-}
-
 .shortcut-guide__item {
   display: flex;
   align-items: center;
@@ -1411,10 +1403,6 @@ body.v3-page[data-bsv-theme="dark"] {
   gap: 0.75rem;
 }
 
-.settings-hero {
-  padding: clamp(0.9rem, 1.8vw, 1.3rem);
-}
-
 .settings-content {
   align-items: start;
 }
@@ -1459,10 +1447,6 @@ body.v3-page[data-bsv-theme="dark"] {
 
 .status-text--error {
   color: var(--bsv-error);
-}
-
-.status-text--warning {
-  color: var(--bsv-warning);
 }
 
 .status-text--info {

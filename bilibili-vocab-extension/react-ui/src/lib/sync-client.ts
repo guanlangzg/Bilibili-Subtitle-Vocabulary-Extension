@@ -36,6 +36,8 @@ export interface SyncRunResult {
   cursor: number;
   pages: number;
   syncedAt: number;
+  /** True when the pull loop hit MAX_PULL_PAGES and remote records remain. */
+  hasMore: boolean;
   deviceId?: string;
   settings: SyncSettings;
 }

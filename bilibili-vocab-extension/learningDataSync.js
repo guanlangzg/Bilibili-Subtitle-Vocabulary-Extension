@@ -47,7 +47,7 @@
   function normalizeSyncSettings(raw) {
     const source = raw && typeof raw === 'object' ? raw : {};
     const serverUrl = typeof source.serverUrl === 'string' ? source.serverUrl.trim() : '';
-    const token = typeof source.token === 'string' ? source.token.trim() : '';
+    const token = typeof source.token === 'string' ? source.token : '';
     return {
       enabled: source.enabled === true,
       serverUrl,

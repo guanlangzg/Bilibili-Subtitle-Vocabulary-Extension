@@ -1,3 +1,3 @@
-export { exportVocabularyBook, clearVocabularyBook } from './storage';
+export { clearVocabularyBook } from './storage';
 
-export type { VocabularyExportFormat, VocabularySource, VocabularyWord } from './storage';
+export type { VocabularySource } from './storage';

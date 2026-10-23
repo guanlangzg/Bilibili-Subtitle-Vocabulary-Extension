@@ -785,7 +785,7 @@ test('check extension package: should expose conservative default budgets', () =
   assert.equal(DEFAULT_MAX_ENTRY_COUNT, 80);
   assert.deepEqual(REQUIRED_STATIC_PACKAGE_ENTRIES, ['manifest.json']);
   assert.ok(createRequiredPackageEntries().includes('dist/overlay.js'));
-  assert.ok(createRequiredPackageEntries().includes('dist/assets/study-preview-chunk.js'));
+  assert.ok(createRequiredPackageEntries().includes('dist/assets/use-undo-action-chunk.js'));
   assert.ok(createRequiredPackageEntries().includes('contentScript/index.js'));
   assert.deepEqual(ALLOWED_DIST_PACKAGE_ENTRIES, [
     'dist/options.html',
@@ -793,8 +793,8 @@ test('check extension package: should expose conservative default budgets', () =
     'dist/overlay.js',
     'dist/assets/options.js',
     'dist/assets/popup.js',
-    'dist/assets/study-preview-chunk.js',
-    'dist/assets/study-preview.css',
+    'dist/assets/use-undo-action-chunk.js',
+    'dist/assets/use-undo-action.css',
   ]);
   assert.deepEqual(ALLOWED_DATA_PACKAGE_ENTRIES, collectPublishedDataPackageEntries());
   assert.deepEqual(FORBIDDEN_PACKAGE_ENTRIES, EXPECTED_FORBIDDEN_PACKAGE_ENTRIES);

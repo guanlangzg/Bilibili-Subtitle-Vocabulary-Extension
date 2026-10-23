@@ -23,7 +23,7 @@ interface OnboardingPanelProps {
   onDismiss: () => void;
 }
 
-export const ONBOARDING_GOAL_META: Record<OnboardingGoal, OnboardingGoalMeta> = {
+const ONBOARDING_GOAL_META: Record<OnboardingGoal, OnboardingGoalMeta> = {
   light: {
     title: '轻量接触',
     subtitle: '15% · 单句 1 词 · 慢速复习',
@@ -44,7 +44,7 @@ export const ONBOARDING_GOAL_META: Record<OnboardingGoal, OnboardingGoalMeta> = 
   },
 };
 
-export function shouldShowOnboarding(state: OnboardingState | null): boolean {
+function shouldShowOnboarding(state: OnboardingState | null): boolean {
   return Boolean(state && !state.completedAt);
 }
 

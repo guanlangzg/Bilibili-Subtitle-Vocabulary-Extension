@@ -164,7 +164,10 @@ test('permission docs contract: public docs should match manifest permissions', 
     : [];
 
   assert.match(privacy, /chrome\.storage\.local/);
-  assert.match(privacy, /不会把学习数据、已收藏词、设置或指标发送到项目自有服务器/);
+  assert.match(privacy, /默认不同步/);
+  assert.match(privacy, /手动点击「立即同步」或「检查服务器状态」/);
+  assert.match(privacy, /不内置、也不默认连接任何项目自有服务器/);
+  assert.match(privacy, /不会删除已上传的历史学习事实/);
   assert.match(privacy, /Bilibili 官方播放器和字幕 API/);
   assert.match(privacy, /YouTube[\s\S]*caption DOM/);
   assert.match(privacy, /显式用户授权 UI/);

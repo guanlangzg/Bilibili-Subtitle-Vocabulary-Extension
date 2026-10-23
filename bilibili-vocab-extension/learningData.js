@@ -20,6 +20,10 @@
       .toLowerCase();
   }
 
+  const MD5_SIN_TABLE = Array.from({ length: 64 }, (_, index) =>
+    Math.floor(Math.abs(Math.sin(index + 1)) * 0x100000000)
+  );
+
   // Java's nameUUIDFromBytes hashes the UTF-8 name directly, without a namespace.
   function wordId(word) {
     const bytes = new TextEncoder().encode(normalizeWord(word));
@@ -43,12 +47,7 @@
         else f = c ^ (b | ~d);
         const index = [i, (5 * i + 1) % 16, (3 * i + 5) % 16, (7 * i) % 16][round];
         const shift = shifts[round * 4 + (i % 4)];
-        const sum =
-          (a +
-            f +
-            Math.floor(Math.abs(Math.sin(i + 1)) * 0x100000000) +
-            view.getUint32(offset + index * 4, true)) |
-          0;
+        const sum = (a + f + MD5_SIN_TABLE[i] + view.getUint32(offset + index * 4, true)) | 0;
         [a, b, c, d] = [d, (b + ((sum << shift) | (sum >>> (32 - shift)))) | 0, b, c];
       }
       [a, b, c, d].forEach((value, index) => {

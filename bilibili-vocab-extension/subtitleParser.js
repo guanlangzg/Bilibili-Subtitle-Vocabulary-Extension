@@ -115,6 +115,8 @@
     'label',
   ];
 
+  const EXCLUDED_ANCESTOR_SELECTOR = EXCLUDED_ANCESTOR_SELECTORS.join(',');
+
   const HEURISTIC_SELECTORS = [
     // Bilibili
     ".bpx-player-subtitle-wrap [class*='subtitle']",
@@ -361,7 +363,9 @@
   }
 
   function isInExcludedContext(element) {
-    return EXCLUDED_ANCESTOR_SELECTORS.some((selector) => element.closest(selector));
+    // One combined selector keeps this at a single closest() walk per candidate
+    // instead of 34 separate ancestor walks.
+    return Boolean(element.closest(EXCLUDED_ANCESTOR_SELECTOR));
   }
 
   function isInSubtitleZone(element, playerRect) {

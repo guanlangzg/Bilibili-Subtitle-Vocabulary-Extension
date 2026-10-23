@@ -236,6 +236,30 @@ test('learning data storage: the first mutation captures baselines before its ow
   assert.equal(chromeStub.state[WORD_STATS_V2_KEY].alpha.exposureCount, 4);
 });
 
+test('learning data storage: a hit reply carries only the acknowledgement fields', async (t) => {
+  const chromeStub = createChromeStub(legacyStats());
+  withChrome(chromeStub, t);
+  const { backgroundLearningState } = loadBackgroundStack();
+
+  const result = await backgroundLearningState.recordLearningHit({
+    word: 'alpha',
+    eventId: 'evt-light-1',
+    now: 5000,
+  });
+  assert.deepEqual(Object.keys(result).sort(), ['eventId', 'word']);
+  assert.equal(result.word, 'alpha');
+  assert.equal(result.eventId, 'evt-light-1');
+  assert.equal(chromeStub.state[WORD_STATS_V2_KEY].alpha.exposureCount, 4);
+
+  const retry = await backgroundLearningState.recordLearningHit({
+    word: 'alpha',
+    eventId: 'evt-light-1',
+    now: 5000,
+  });
+  assert.deepEqual(Object.keys(retry).sort(), ['duplicate', 'eventId', 'word']);
+  assert.equal(retry.duplicate, true);
+});
+
 test('learning data storage: a retried hit keeps the same id and never counts twice', async (t) => {
   const chromeStub = createChromeStub(legacyStats());
   withChrome(chromeStub, t);

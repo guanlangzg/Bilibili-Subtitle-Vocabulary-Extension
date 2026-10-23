@@ -20,26 +20,27 @@ const DEFAULT_REPORT_DIR = path.join(
   'continuous-optimization'
 );
 const DEFAULT_MAX_LOG_CHARS = 4000;
-const LEGACY_DEFERRED_TEST_PATTERNS = [/^options-.*\.test\.js$/, /^popup(?:-.*)?\.test\.js$/];
 const OUT_OF_BAND_SMOKE_TESTS = [
   'browser-extension-smoke.spec.js',
   'extension-zip-smoke.spec.js',
   'real-site-smoke.spec.js',
 ];
-const LEGACY_COMPAT_TESTS_IN_OPTIMIZE_LANE = ['shared-settings-integration.test.js'];
-const LEGACY_DEFERRED_REASON = `manifest / pack 真实交付入口是 dist/popup.html / dist/options.html；root popup.js / options.js 仍是 legacy popup/options 入口，因此默认只在报告中显式暴露，不并入 shipped optimize shard。共享默认值与 fallback 兼容仍通过 ${LEGACY_COMPAT_TESTS_IN_OPTIMIZE_LANE.join(
-  ' / '
-)} 留在 optimize lane；剩余 legacy shell tests 的后续动作应是迁移可复用逻辑到 shared helper 或单独 legacy lane，而不是直接并入 shipped shard。`;
 
 const STATIC_OPTIMIZATION_GAPS = [
   {
-    id: 'content-script-decomposition',
+    id: 'content-script-lifecycle-coverage',
     priority: 0,
-    title: '围绕 contentScript.js 做定向拆分或补守卫测试',
+    title: '测量 contentScript 轮询与观察者的持续开销',
     rationale:
-      'contentScript.js 仍是最高复杂区，初始化、缓存、观察者、字幕导航和 overlay 桥接耦合较重。',
-    files: ['contentScript.js', 'subtitleParser.js', 'subtitleNavigation.js'],
-    suggestedCommands: ['node --test tests/contentScript-*.test.js tests/subtitle*.test.js'],
+      'dom-observer 每 300ms 检查观察者目标并调度字幕探测，MutationObserver 节流只有前缘没有尾调度；评估调度调整前需测量有字幕、无字幕与暂停播放时的开销，并保留节点重用和停用后的行为。',
+    files: [
+      'contentScript/index.js',
+      'contentScript/dom-observer.js',
+      'contentScript/constants.js',
+    ],
+    suggestedCommands: [
+      'node --test tests/contentScript-observer-throttle.test.js tests/contentScript-timeline-polling.test.js',
+    ],
   },
 ];
 
@@ -58,7 +59,6 @@ const TEST_SHARD_DEFINITIONS = [
       /^learning-.*\.test\.js$/,
       /^runtime-messaging\.test\.js$/,
       /^runtime-message-trust-boundary\.test\.js$/,
-      /^settings-ui-state-machine\.test\.js$/,
       /^shared-settings.*\.test\.js$/,
       /^utils(?:-.*)?\.test\.js$/,
       /^vocabulary.*\.test\.js$/,
@@ -169,10 +169,6 @@ function formatDuplicateShardAssignments(duplicateAssignments = []) {
   return duplicateAssignments
     .map(({ testFile, assignedShards }) => `${testFile} -> ${assignedShards.join(', ')}`)
     .join('; ');
-}
-
-function isLegacyDeferredTest(testFileName) {
-  return LEGACY_DEFERRED_TEST_PATTERNS.some((pattern) => pattern.test(String(testFileName || '')));
 }
 
 function isOutOfBandSmokeTest(testFileName) {
@@ -363,7 +359,6 @@ function selectOptimizationCandidates(summary) {
   }
 
   const extraCandidates = [];
-  const tailCandidates = [];
 
   if (Array.isArray(summary.unassignedTests) && summary.unassignedTests.length > 0) {
     extraCandidates.push({
@@ -376,30 +371,17 @@ function selectOptimizationCandidates(summary) {
     });
   }
 
-  if (Array.isArray(summary.deferredLegacyTests) && summary.deferredLegacyTests.length > 0) {
-    tailCandidates.push({
-      id: 'legacy-deferred-tests',
-      priority: 0,
-      title: '迁移或淘汰 legacy popup/options shell 测试',
-      rationale: `当前有 ${summary.deferredLegacyTests.length} 个测试文件锁定 legacy popup/options 入口；${LEGACY_DEFERRED_REASON}`,
-      files: summary.deferredLegacyTests.slice(),
-      suggestedCommands: buildNodeTestCommand(summary.deferredLegacyTests),
-    });
-  }
-
   const prioritizedBlindSpots = STATIC_OPTIMIZATION_GAPS.map((item) => ({
     ...item,
     files: item.files.slice(),
     suggestedCommands: item.suggestedCommands.slice(),
   }));
 
-  if (extraCandidates.length > 0 || tailCandidates.length > 0) {
-    return [...extraCandidates, ...prioritizedBlindSpots, ...tailCandidates].map(
-      (candidate, index) => ({
-        ...candidate,
-        priority: index,
-      })
-    );
+  if (extraCandidates.length > 0) {
+    return [...extraCandidates, ...prioritizedBlindSpots].map((candidate, index) => ({
+      ...candidate,
+      priority: index,
+    }));
   }
 
   return prioritizedBlindSpots;
@@ -463,22 +445,6 @@ function renderMarkdownReport(summary) {
     lines.push('- None');
   } else {
     for (const testFile of summary.unassignedTests) {
-      lines.push(`- ${testFile}`);
-    }
-  }
-
-  lines.push('', '## Legacy Deferred Tests', '');
-
-  if (summary.deferredLegacyTests.length === 0) {
-    lines.push('- None');
-  } else {
-    lines.push(
-      `- 说明: manifest / pack 真实交付入口是 \`dist/popup.html\` / \`dist/options.html\`；以下测试直接锁定 root \`popup.js\` / \`options.js\`，因此默认只在报告中显式暴露，不并入 shipped optimize shard。`
-    );
-    lines.push(
-      '- 后续: 迁移可复用逻辑到 shared helper 或单独 legacy lane，再决定是否保留这些 legacy shell tests。'
-    );
-    for (const testFile of summary.deferredLegacyTests) {
       lines.push(`- ${testFile}`);
     }
   }
@@ -680,7 +646,6 @@ async function runContinuousOptimization(options = {}) {
     gates: gateResults,
     shards: shardResults,
     unassignedTests: [],
-    deferredLegacyTests: [],
     outOfBandSmokeTests: [],
     knownBlindSpots: STATIC_OPTIMIZATION_GAPS.map((item) => ({
       id: item.id,
@@ -692,11 +657,8 @@ async function runContinuousOptimization(options = {}) {
 
   const rawUnassignedTests = collectUnassignedTests(plan.testsDir, plan.shards);
   summary.outOfBandSmokeTests = rawUnassignedTests.filter(isOutOfBandSmokeTest);
-  summary.deferredLegacyTests = rawUnassignedTests.filter(
-    (testFile) => !isOutOfBandSmokeTest(testFile) && isLegacyDeferredTest(testFile)
-  );
   summary.unassignedTests = rawUnassignedTests.filter(
-    (testFile) => !isOutOfBandSmokeTest(testFile) && !isLegacyDeferredTest(testFile)
+    (testFile) => !isOutOfBandSmokeTest(testFile)
   );
 
   summary.nextFocusCandidates = selectOptimizationCandidates(summary);

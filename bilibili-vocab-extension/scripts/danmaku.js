@@ -58,9 +58,14 @@
   let speedPreset = 'normal';
   let densityPreset = 'normal';
   const trackUsage = new Array(MAX_TRACK_COUNT).fill(null);
+  const pendingCleanupTimers = new Set();
   const DEBUG_PREFIX = '[DanmakuReview][Danmaku]';
+  const DEBUG_LOG_FLAG = '__BILI_VOCAB_DEBUG_LOGS__';
 
   function debugDanmakuState(message, payload) {
+    if (globalScope[DEBUG_LOG_FLAG] !== true) {
+      return;
+    }
     if (typeof console === 'undefined' || typeof console.debug !== 'function') {
       return;
     }
@@ -367,6 +372,7 @@
   function cleanupNode(node, fallbackTimer, trackIndex) {
     if (fallbackTimer) {
       clearTimeout(fallbackTimer);
+      pendingCleanupTimers.delete(fallbackTimer);
     }
 
     if (typeof trackIndex === 'number' && trackUsage[trackIndex] === node) {
@@ -466,8 +472,10 @@
     });
 
     const fallbackTimer = setTimeout(() => {
+      pendingCleanupTimers.delete(fallbackTimer);
       cleanupNode(node, null, trackIndex);
     }, flyDurationMs + 500);
+    pendingCleanupTimers.add(fallbackTimer);
 
     node.addEventListener(
       'transitionend',
@@ -486,13 +494,27 @@
   }
 
   function clearDanmaku() {
+    pendingCleanupTimers.forEach((timer) => clearTimeout(timer));
+    pendingCleanupTimers.clear();
+
     if (!(container instanceof HTMLElement)) {
+      activeCount = 0;
+      trackUsage.fill(null);
       return;
     }
 
     container.innerHTML = '';
     activeCount = 0;
     trackUsage.fill(null);
+  }
+
+  function destroy() {
+    stopHostObserver();
+    clearDanmaku();
+    if (container && container.parentElement) {
+      container.parentElement.removeChild(container);
+    }
+    container = null;
   }
 
   const api = {
@@ -513,6 +535,7 @@
     setDensityPreset,
     shootWordDanmaku,
     clearDanmaku,
+    destroy,
   };
 
   globalScope.DanmakuModule = api;

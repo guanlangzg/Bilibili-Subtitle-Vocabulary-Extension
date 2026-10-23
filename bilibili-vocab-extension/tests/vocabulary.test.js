@@ -248,3 +248,126 @@ test('findMatchesInText: 不在匹配词表中的虚词不应被替换', () => {
   });
   assert.deepEqual(matches, []);
 });
+
+test('refreshLearningStateFromStorage: 学习状态刷新后匹配索引仍返回最新学习字段', async () => {
+  const previousStorageChrome = global.chrome;
+  const now = 1700000000000;
+  global.chrome = {
+    runtime: {
+      lastError: null,
+      sendMessage(_message, callback) {
+        callback({ ok: true, payload: {} });
+      },
+    },
+    storage: {
+      local: {
+        get(_keys, callback) {
+          callback({
+            bili_vocab_word_stats_v2: {
+              identification: {
+                word: 'identification',
+                translation: '识别',
+                level: 'CET4',
+                exposureCount: 4,
+                hitCount: 4,
+                seenCount: 4,
+                saveCount: 1,
+                status: 'saved',
+                nextReviewBucket: 'soon',
+                intervalDays: 3,
+                easeFactor: 2.5,
+                lastSeenAt: now,
+                lastSeen: now,
+              },
+            },
+            bili_vocab_review_queue_v1: {},
+            bili_vocab_learning_summary_v1: {},
+          });
+        },
+        set(_payload, callback) {
+          if (callback) callback();
+        },
+      },
+    },
+  };
+
+  try {
+    vocabulary.__setEntriesForTest([
+      {
+        word: 'identification',
+        meaning: '识别',
+        aliases: ['识别'],
+        level: 'CET4',
+        coverageTier: 'core',
+      },
+      {
+        word: 'identification',
+        meaning: '鉴定；认同',
+        aliases: ['识别'],
+        level: 'TOEFL',
+        coverageTier: 'full',
+      },
+    ]);
+
+    const before = vocabulary.findMatchesInText('需要识别这段文本', ['CET4'], {
+      vocabularyMode: 'core',
+    });
+    assert.equal(before.length, 1);
+    assert.equal(before[0].learningStatus, 'unseen');
+
+    await vocabulary.refreshLearningStateFromStorage();
+
+    const after = vocabulary.findMatchesInText('需要识别这段文本', ['CET4'], {
+      vocabularyMode: 'core',
+    });
+    assert.equal(after.length, 1);
+    assert.equal(after[0].word, 'identification');
+    assert.equal(after[0].learningStatus, 'saved');
+
+    // Both level entries share the refreshed record.
+    const encountered = vocabulary.getEncounteredWords();
+    assert.deepEqual(encountered.map((item) => item.level).sort(), ['CET4', 'TOEFL']);
+    encountered.forEach((item) => {
+      assert.equal(item.hitCount, 4);
+    });
+
+    // A later hit resolves through wordIndex to the refreshed object.
+    assert.equal(vocabulary.recordHit('identification'), true);
+    const afterHit = vocabulary.findMatchesInText('需要识别这段文本', ['CET4'], {
+      vocabularyMode: 'core',
+    });
+    assert.equal(afterHit[0].learningStatus, 'saved');
+  } finally {
+    global.chrome = previousStorageChrome;
+  }
+});
+
+test('recordHit: 别名不在释义里时匹配索引也应拿到最新学习状态', () => {
+  // 索引按 matchTerms(curated alias) 建桶，若更新时只改 meaningTerms 桶，
+  // 该词命中后 findMatchesInText 仍会返回旧 entry 的 learningStatus。
+  vocabulary.__setEntriesForTest([
+    {
+      word: 'optimize',
+      meaning: '优化',
+      aliases: ['改进'],
+      level: 'CET4',
+      coverageTier: 'core',
+    },
+  ]);
+
+  const before = vocabulary.findMatchesInText('我们需要改进字幕系统', ['CET4'], {
+    vocabularyMode: 'core',
+  });
+  assert.equal(before.length, 1);
+  assert.equal(before[0].learningStatus, 'unseen');
+
+  assert.equal(vocabulary.recordHit('optimize'), true);
+  assert.equal(vocabulary.recordHit('optimize'), true);
+
+  const after = vocabulary.findMatchesInText('我们需要改进字幕系统', ['CET4'], {
+    vocabularyMode: 'core',
+  });
+  assert.equal(after.length, 1);
+  assert.equal(after[0].word, 'optimize');
+  assert.equal(after[0].learningStatus, 'seen');
+});

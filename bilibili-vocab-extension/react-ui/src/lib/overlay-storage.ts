@@ -13,7 +13,7 @@ export interface LearningSummary {
   todayCount: number;
   newCount: number;
   masteredCount: number;
-  recentWords: Array<{ word: string; translation?: string; status?: string }>;
+  recentWords: Array<{ word: string; status?: string }>;
 }
 
 function createStorageMutationTimeoutError(): Error {
@@ -89,7 +89,6 @@ function normalizeLearningSummary(value: unknown): LearningSummary {
         .filter((item): item is Record<string, unknown> => isRecord(item))
         .map((item) => ({
           word: String(item.word || '').trim(),
-          translation: String(item.translation || '').trim(),
           status: String(item.status || '').trim(),
         }))
         .filter((item) => Boolean(item.word))

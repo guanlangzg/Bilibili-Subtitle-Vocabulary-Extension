@@ -171,6 +171,9 @@
     })();
 
     async function processSubtitles() {
+      if (destroyed) {
+        return;
+      }
       var subtitleItems = globalThis.SubtitleParser.getCurrentSubtitleItems();
       if (subtitleItems.length === 0) {
         if (hasMethod(globalThis.SubtitleParser, 'loadSubtitleTimeline')) {
@@ -179,11 +182,17 @@
             return [];
           });
         }
+        if (destroyed) {
+          return;
+        }
         var fallbackText = normalizeText(
           globalThis.SubtitleParser.getSubtitleFromTimelineAtCurrentTime()
         );
+        if (!fallbackText) {
+          return;
+        }
         var fallbackElement = globalThis.SubtitleParser.getPrimarySubtitleElement();
-        if (fallbackElement && fallbackText) {
+        if (fallbackElement) {
           await applyTranslation(fallbackElement, fallbackText);
         }
         return;
@@ -200,14 +209,26 @@
         return !item || item.mode !== 'page';
       });
       await runInAnimationFrame(async function () {
+        if (destroyed) {
+          return;
+        }
         for (var i = 0; i < subtitleModeItems.length; i += 1) {
+          if (destroyed) {
+            return;
+          }
           await applyTranslation(subtitleModeItems[i].element);
+        }
+        if (destroyed) {
+          return;
         }
         if (shouldRestoreWebItems(settings)) {
           restoreItemsToSourceText(webItems);
           return;
         }
         for (var j = 0; j < webItems.length; j += 1) {
+          if (destroyed) {
+            return;
+          }
           await applyTranslation(webItems[j].element, webItems[j].text);
         }
       });
@@ -225,6 +246,9 @@
       pendingProcess = false;
       try {
         await processSubtitles();
+        if (destroyed) {
+          return;
+        }
         if (shouldRunLegacyWebTextPipeline()) {
           await processWebPageText();
         }

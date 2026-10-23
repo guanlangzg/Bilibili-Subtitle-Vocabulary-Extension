@@ -20,25 +20,6 @@ export function syncOriginPattern(serverUrl: string): string {
   return `${parsed.protocol}//${parsed.host}/*`;
 }
 
-export function hasSyncOriginPermission(serverUrl: string): Promise<boolean> {
-  if (!hasChromePermissions()) return Promise.resolve(false);
-  let pattern: string;
-  try {
-    pattern = syncOriginPattern(serverUrl);
-  } catch {
-    return Promise.resolve(false);
-  }
-  return new Promise<boolean>((resolve) => {
-    chrome.permissions.contains({ origins: [pattern] }, (granted) => {
-      if (chrome.runtime && chrome.runtime.lastError) {
-        resolve(false);
-        return;
-      }
-      resolve(granted === true);
-    });
-  });
-}
-
 export function requestSyncOriginPermission(serverUrl: string): Promise<boolean> {
   if (!hasChromePermissions()) return Promise.resolve(false);
   let pattern: string;
